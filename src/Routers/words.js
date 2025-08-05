@@ -40,9 +40,7 @@ async function word(email, res) {
     let answer = {
         value: await req.getWord(profile.language, 5, false)
     }
-
-    console.log(answer)
-
+    
     res.send(answer)
 }
 
@@ -60,7 +58,6 @@ async function getWord(diffcultyKey, email, res) {
         },
     };
     
-    console.log(answer)
     res.send(answer);
 }
 
