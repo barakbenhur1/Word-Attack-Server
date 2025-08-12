@@ -17,6 +17,11 @@ router.post("/changeLanguage", function (req, res) {
   changeLanguage(email, language, res);
 });
 
+router.post("/gender", function (req, res) {
+  const email = req.body.email;
+  getGender(email, res);
+});
+
 async function login(email, name, gender, language, res) {
   let profile = await Profile.findOne({ email: email });
 
@@ -29,6 +34,15 @@ async function login(email, name, gender, language, res) {
   }
 
   res.send({});
+}
+
+async function getGender(email, res) {
+   let profile = await Profile.findOne({ email: email });
+   if (result.exsit(profile)) {
+     res.send({ gender: profile.gender })
+   } else {
+     res.send({ gender: null })
+   }
 }
 
 async function changeLanguage(email, language, res) {
