@@ -6,6 +6,7 @@ const result = require("../Hendlers/Result");
 router.post("/", function (req, res) {
   const email = req.body.email;
   const name = req.body.name;
+  const gender = req.body.gender;
   const language = req.body.language;
   login(email, name, language, res);
 });
@@ -16,11 +17,11 @@ router.post("/changeLanguage", function (req, res) {
   changeLanguage(email, language, res);
 });
 
-async function login(email, name, language, res) {
+async function login(email, name, gender, language, res) {
   let profile = await Profile.findOne({ email: email });
 
   if (!result.exsit(profile)) {
-    profile = await Profile({ email: email, name: name, language: language });
+    profile = await Profile({ email: email, name: name, gender: gender, language: language });
     profile.save();
   } else if (profile.language != language) {
     profile.language = language;
