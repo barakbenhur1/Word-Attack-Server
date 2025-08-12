@@ -8,7 +8,7 @@ router.post("/", function (req, res) {
   const name = req.body.name;
   const gender = req.body.gender;
   const language = req.body.language;
-  login(email, name, language, res);
+  login(email, name, language, gender, res);
 });
 
 router.post("/changeLanguage", function (req, res) {
