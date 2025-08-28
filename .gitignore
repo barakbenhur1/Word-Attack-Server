@@ -29,6 +29,11 @@ playground.xcworkspace
 # hence it is not needed unless you have added a package configuration file to your project
 # .swiftpm
 
+# Node.js
+node_modules/
+npm-debug.log
+.env
+
 .build/
 
 # CocoaPods
