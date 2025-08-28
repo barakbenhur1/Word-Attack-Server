@@ -5,7 +5,8 @@ const result = require("./Result");
 // Function to fetch a random article title from Wikipedia with language and length options
 async function getWord(language, length, maxReqeusts) {
   if (!maxReqeusts && language == "en") {
-    return await getEnglishWord(length);
+    // return await getEnglishWord(length);
+    return await getFromWiki(language, length);
   } else {
     return await getFromWiki(language, length);
   }
