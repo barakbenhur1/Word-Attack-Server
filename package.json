@@ -15,5 +15,9 @@
     "url": "https://github.com/barakbenhur1/Word-Attack/issues"
   },
   "homepage": "https://github.com/barakbenhur1/Word-Attack#readme",
-  "description": ""
+  "description": "",
+  "keywords": [],
+  "dependencies": {
+    "express": "^5.1.0"
+  }
 }
