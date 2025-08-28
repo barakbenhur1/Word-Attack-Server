@@ -13,6 +13,12 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log
+.env
+
 ## Playgrounds
 timeline.xctimeline
 playground.xcworkspace
