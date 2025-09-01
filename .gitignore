@@ -18,6 +18,7 @@ node_modules/
 package-lock.json
 npm-debug.log
 .env
+keys/*.p8
 
 ## Playgrounds
 timeline.xctimeline
