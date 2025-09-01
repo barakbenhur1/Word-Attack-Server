@@ -1,17 +1,18 @@
 const moment = require("moment");
-const result = require("../Hendlers/Result");
+const misc = require("../Hendlers/Result");
 const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const req = require("../Hendlers/Request");
 
-async function get(diffcultyKey, email) {
+async function get(diffKey, email) {
   const dayKey = moment().format("DD/MM/YYYY");
+  const diffcultyKey = misc.cleanText(diffKey);
 
   const profile = await Profile.findOne({ email: email });
   const languageKey = profile.language;
   let language = await Languages.findOne({ value: languageKey });
 
-  if (!result.exsit(language)) {
+  if (!misc.exsit(language)) {
     language = await Languages({ value: languageKey });
     language.save();
     return get(diffcultyKey, email);
@@ -53,7 +54,7 @@ async function get(diffcultyKey, email) {
               : 6;
 
             diffculty.words.push(
-              await req.getWord(profile.language, length, words.length == 10000)
+              await req.getWord(profile.language, length, words)
             );
             language.save();
             return get(diffcultyKey, email);

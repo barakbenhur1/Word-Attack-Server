@@ -3,6 +3,7 @@ const router = express();
 const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const memberProvider = require("../Hendlers/Member");
+const misc = require("../Hendlers/Result");
 
 router.post("/score", function (req, res) {
   const diffculty = req.body.diffculty;
@@ -68,7 +69,7 @@ async function place(email, res) {
       );
 
       if (idx >= 0) {
-        result[cleanText(key)] = idx + 1; // 1-based place
+        result[misc.cleanText(key)] = idx + 1; // 1-based place
       }
     }
 
@@ -77,17 +78,6 @@ async function place(email, res) {
     console.error("place error:", err);
     res.status(500).send({ error: "internal_error" });
   }
-}
-
-function cleanText(input) {
-  if (!input) return "";
-
-  // 1. Remove emoji and symbols outside basic multilingual plane
-  // (covers most emojis)
-  const noEmojis = input.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "");
-
-  // 2. Collapse multiple spaces into one, and trim
-  return noEmojis.replace(/\s+/g, " ").trim();
 }
 
 module.exports = router;

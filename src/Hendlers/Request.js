@@ -3,16 +3,16 @@ const axios = require("axios");
 const result = require("./Result");
 
 // Function to fetch a random article title from Wikipedia with language and length options
-async function getWord(language, length, maxReqeusts) {
-  if (!maxReqeusts && language == "en") {
+async function getWord(language, length, wordList) {
+  if (language == "en") {
     // return await getEnglishWord(length);
-    return await getFromWiki(language, length);
+    return await getFromWiki(language, wordList, length);
   } else {
-    return await getFromWiki(language, length);
+    return await getFromWiki(language, wordList, length);
   }
 }
 
-async function getFromWiki(language, length) {
+async function getFromWiki(language, wordList, length) {
   const url = `https://${language}.wikipedia.org/w/api.php`;
 
   const params = {
@@ -36,7 +36,9 @@ async function getFromWiki(language, length) {
       const combinedWords = [...titleWords, ...extractWords];
       const word = combinedWords.find(
         (w) =>
-          w.length === length &&
+          w.length === length && 
+          (!Array.isArray(wordList) || 
+          !wordList.some(v => v.value === w)) && 
           (language == "en" ? isEnglish(w) : isHebrew(w))
       );
 
@@ -44,9 +46,7 @@ async function getFromWiki(language, length) {
         return word;
     }
     return getFromWiki(language, length);
-  } catch (error) {
-    return error;
-  }
+  } catch (error) { return error; }
 }
 
 async function getEnglishWord(length) {
