@@ -12,41 +12,100 @@ async function getWord(language, length, wordList) {
   }
 }
 
-async function getFromWiki(language, wordList, length) {
+const A_Z  = /^[A-Za-z]+$/;
+const HEB  = /^[\u0590-\u05FF]+$/;
+const HEB_NIQQUD = /[\u0591-\u05C7]/g;
+const HEB_FINALS = { "ך":"כ","ם":"מ","ן":"נ","ף":"פ","ץ":"צ" };
+
+function normalizeHebrew(s) {
+  if (!s) return s;
+  // remove niqqud
+  s = s.replace(HEB_NIQQUD, "");
+  // map finals to base forms
+  s = s.replace(/[ךםןףץ]/g, ch => HEB_FINALS[ch] || ch);
+  return s;
+}
+
+function normalizeEnglish(s) {
+  return s ? s.toLowerCase() : s;
+}
+
+function normalizeWord(s, language) {
+  if (!s) return s;
+  return language === "he" ? normalizeHebrew(s) : normalizeEnglish(s.toLowerCase());
+}
+
+function isLetters(raw, language) {
+  return language === "he" ? HEB.test(raw) : A_Z.test(raw);
+}
+
+function tokenize(text) {
+  // split on non-Hebrew/English letters, drop empties
+  return (text || "").split(/[^A-Za-z\u0590-\u05FF]+/).filter(Boolean);
+}
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+async function getFromWiki(language, wordList, length, retries = 3) {
   const url = `https://${language}.wikipedia.org/w/api.php`;
 
   const params = {
     action: "query",
-    list: "random",
-    rnlimit: 5,
-    format: "json",
+    generator: "random",
+    grnlimit: 50,
+    grnnamespace: 0,         // mainspace only (no User:, Talk:, etc.)
     prop: "extracts",
     exchars: 500,
-    explaintext: true,
+    explaintext: 1,
+    redirects: 1,
+    format: "json",
+    origin: "*"
   };
+
+  // Build a normalized blocklist from wordList
+  const blocked = new Set(
+    Array.isArray(wordList)
+      ? wordList
+          .map(w => String(w.value))
+          .map(w => normalizeWord(w, language))
+      : []
+  );
 
   try {
     const { data } = await axios.get(url, { params });
-    const articles = data.query.random;
+    const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
 
-    for (let article of articles) {
-      const titleWords = article.title.split(" ");
-      const extractWords = (article.extract || "").split(" ");
+    const candidates = [];
+    for (const page of pages) {
+      const titleWords   = tokenize(page.title);
+      const extractWords = tokenize(page.extract);
+      const combined     = [...titleWords, ...extractWords];
 
-      const combinedWords = [...titleWords, ...extractWords];
-      const word = combinedWords.find(
-        (w) =>
-          w.length === length && 
-          (!Array.isArray(wordList) || 
-          !wordList.some(v => v.value === w)) && 
-          (language == "en" ? isEnglish(w) : isHebrew(w))
-      );
+      for (const raw of combined) {
+        if (raw.length !== length) continue;
+        if (!isLetters(raw, language)) continue;
 
-      if (result.exsit(word) && (await isWordInLanguage(word, language)))
-        return word;
+        const norm = normalizeWord(raw, language);
+        if (!blocked.has(norm)) {
+          candidates.push(raw); // keep original for display/return
+        }
+      }
     }
-    return getFromWiki(language, length);
-  } catch (error) { return error; }
+
+    if (candidates.length > 0) {
+      return pickRandom(candidates);
+    }
+
+    if (retries > 0) {
+      return getFromWiki(language, wordList, length, retries - 1);
+    }
+
+    throw new Error("No suitable word found after multiple attempts.");
+  } catch (err) {
+    throw err;
+  }
 }
 
 async function getEnglishWord(length) {
