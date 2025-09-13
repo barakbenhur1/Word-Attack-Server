@@ -11,6 +11,12 @@ const Member = {
   words: { type: [Word], default: [] },
 };
 
+const PremiumMember = {
+  email: String,
+  name: String,
+  premiumScore:{ type: Number, default: 0 },
+};
+
 const Diffculty = {
   value: String,
   words: { type: [String], default: [] },
@@ -25,7 +31,7 @@ const Day = {
 const schema = {
   value: String,
   days: { type: [Day], default: [] },
-  premiumScore:{ type: Number, default: -1 },
+  premium: { type: [PremiumMember], default: [] },
 };
 
 module.exports = schema;

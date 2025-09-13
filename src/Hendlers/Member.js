@@ -10,7 +10,7 @@ async function get(diffKey, email) {
 
   const profile = await Profile.findOne({ email: email });
   const languageKey = profile.language;
-  let language = await Languages.findOne({ value: languageKey });
+  let language = await Languages.findOne({ value: languageKey }, { days: 1 });
 
   if (!misc.exsit(language)) {
     language = await Languages({ value: languageKey });
@@ -90,4 +90,27 @@ async function get(diffKey, email) {
   return get(diffcultyKey, email);
 }
 
-module.exports = { get }
+async function getPremium(email) {
+  const profile = await Profile.findOne({ email: email });
+  const languageKey = profile.language;
+  let language = await Languages.findOne(
+    { value: languageKey },
+    { premium: 1 }
+  );
+  
+  if (!misc.exsit(language)) {
+    return null;
+  }
+
+  let premiumMembers = language.premium;
+  for (j = 0; j < premiumMembers.length; j++) {
+    const member = premiumMembers[j];
+    if (member.email == email) {
+      return [language, member];
+    }
+  }
+
+  return null;
+}
+
+module.exports = { get, getPremium };
