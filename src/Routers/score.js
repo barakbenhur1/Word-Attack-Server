@@ -53,7 +53,7 @@ async function scoreboard(email, res) {
   res.send(days);
 }
 
-async function getAllPremiumScores(email) {
+async function getPremiumScores(email) {
   const profile = await Profile.findOne({ email: email });
   const languageKey = profile.language;
   let language = await Languages.findOne(
@@ -72,6 +72,7 @@ async function getAllPremiumScores(email) {
     name: p.name,
     email: p.email,
     value: p.premiumScore,
+    rank: premiumMembers.findIndex(o => o.email === p.email) + 1,
   }));
 
   return out;
@@ -121,19 +122,17 @@ async function premiumScore(email, res) {
 }
 
 async function getPremiumScore(email, res) {
-  const member = await memberProvider.getPremium(email);
+  const allSocres = await getPremiumScores(email);
 
-  const allSocres = await getAllPremiumScores(email);
+  const idx = allSocres.findIndex(o => o.email === email);
 
-  const idx = out.findIndex(o => o.email === email);
-  const rank = idx === -1 ? null : idx + 1;
-
+  const member = idx >= 0 ? allSocres[idx] : null;
   if (member != null) {
     return res.send({
-      name: member[1].name,
-      email: member[1].email,
-      value: member[1].premiumScore,
-      rank: rank,
+      name: member.name,
+      email: member.email,
+      value: member.value,
+      rank: member.rank,
     });
   }
 
@@ -143,7 +142,7 @@ async function getPremiumScore(email, res) {
 
 async function getAllPremiumScores(email, res) {
   // find the caller's profile to get its language
-  const out = await getAllPremiumScores(email);
+  const out = await getPremiumScores(email);
   res.send(out);
 }
 
