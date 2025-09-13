@@ -25,6 +25,7 @@ const Day = {
 const schema = {
   value: String,
   days: { type: [Day], default: [] },
+  premiumScore:{ type: Number, default: -1 },
 };
 
 module.exports = schema;
