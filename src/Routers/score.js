@@ -137,7 +137,7 @@ async function getPremiumScore(email, res) {
   }
 
   const profile = await Profile.findOne({ email: email });
-  res.send({ name: profile.name ?? "", email: email, value: 0 });
+  res.send({ name: profile.name ?? "", email: email, value: 0, rank: Number.MAX_SAFE_INTEGER });
 }
 
 async function getAllPremiumScores(email, res) {
