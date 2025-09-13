@@ -53,6 +53,32 @@ async function scoreboard(email, res) {
   res.send(days);
 }
 
+async function getAllPremiumScores(email) {
+  const profile = await Profile.findOne({ email: email });
+  const languageKey = profile.language;
+  let language = await Languages.findOne(
+    { value: languageKey },
+    { premium: 1 }
+  );
+
+  if (!misc.exsit(language)) {
+    return [];
+  }
+
+  let premiumMembers = language.premium;
+
+  // same language premiumScore for all peers
+  const out = premiumMembers.map((p) => ({
+    name: p.name,
+    email: p.email,
+    value: p.premiumScore,
+  }));
+
+  out.sort((a, b) => b.value - a.value);
+
+  return out;
+}
+
 async function score(diffcultyKey, email, res) {
   const member = await memberProvider.get(diffcultyKey, email);
   const words = member[0].words;
@@ -97,11 +123,22 @@ async function premiumScore(email, res) {
 async function getPremiumScore(email, res) {
   const member = await memberProvider.getPremium(email);
 
+  const allSocres = await getAllPremiumScores(email);
+
+  let rank = null;
+  for (let i = 0; i < allSocres.length; i++) {
+    if (allSocres[i].email == email) {
+      rank = i + 1;
+      break;
+    }
+  }
+
   if (member != null) {
     return res.send({
       name: member[1].name,
       email: member[1].email,
       value: member[1].premiumScore,
+      rank: rank,
     });
   }
 
@@ -111,27 +148,7 @@ async function getPremiumScore(email, res) {
 
 async function getAllPremiumScores(email, res) {
   // find the caller's profile to get its language
-  const profile = await Profile.findOne({ email: email });
-  const languageKey = profile.language;
-  let language = await Languages.findOne(
-    { value: languageKey },
-    { premium: 1 }
-  );
-
-  if (!misc.exsit(language)) {
-    return res.send([]);
-  }
-
-  let premiumMembers = language.premium;
-
-  // same language premiumScore for all peers
-  const out = premiumMembers
-  .map((p) => ({
-    name: p.name,
-    email: p.email,
-    value: p.premiumScore,
-  }));
-
+  const out = await getAllPremiumScores(email);
   res.send(out);
 }
 
