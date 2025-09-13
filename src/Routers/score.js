@@ -11,6 +11,16 @@ router.post("/score", function (req, res) {
   score(diffculty, email, res);
 });
 
+router.post("/premiumScore", function (req, res) {
+  const email = req.body.email;
+  premiumScore(email, res);
+});
+
+router.post("/getPremiumScore", function (req, res) {
+  const email = req.body.email;
+  getPremiumScore(email, res);
+});
+
 router.post("/scoreboard", function (req, res) {
   const email = req.body.email;
   scoreboard(email, res);
@@ -45,14 +55,31 @@ async function score(diffcultyKey, email, res) {
   res.send({});
 }
 
+async function premiumScore(email, res) {
+  const profile = await Profile.findOne({ email: email });
+  profile.premiumScore += 1;
+  res.send({});
+}
+
+async function getPremiumScore(email, res) {
+  const profile = await Profile.findOne({ email: email });
+  let result = { value: profile.premiumScore };
+  console.log(result);
+  res.send(result);
+}
+
 async function place(email, res) {
   try {
     const days = await getDaysForUser(email);
-    if (!days.length) { return res.status(404).send({ easy: null, medium: null, hard: null });  }
+    if (!days.length) {
+      return res.status(404).send({ easy: null, medium: null, hard: null });
+    }
 
     // pick the last day (assuming array is ordered chronologically)
     const lastDay = days[days.length - 1];
-    const difficulties = Array.isArray(lastDay.difficulties) ? lastDay.difficulties : [];
+    const difficulties = Array.isArray(lastDay.difficulties)
+      ? lastDay.difficulties
+      : [];
 
     const result = { easy: null, medium: null, hard: null };
 
@@ -65,7 +92,8 @@ async function place(email, res) {
       );
 
       const idx = sorted.findIndex(
-        (m) => String(m.email || "").toLowerCase() === String(email).toLowerCase()
+        (m) =>
+          String(m.email || "").toLowerCase() === String(email).toLowerCase()
       );
 
       if (idx >= 0) {
@@ -81,4 +109,3 @@ async function place(email, res) {
 }
 
 module.exports = router;
-
