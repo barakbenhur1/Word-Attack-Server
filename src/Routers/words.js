@@ -29,7 +29,10 @@ async function word(email, res) {
     value: await req.getWord(profile.language, 5, false),
   };
 
-   await sendSilentPushToAllUsers({ type: "wordzap.refresh", args: { reason: "leaderboard_update" } });
+  await sendSilentPushToAllUsers({
+    type: "wordzap.refresh",
+    args: { reason: "leaderboard_update" },
+  });
 
   res.send(answer);
 }

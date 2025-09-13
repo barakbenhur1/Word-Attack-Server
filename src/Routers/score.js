@@ -41,7 +41,10 @@ async function getDaysForUser(email) {
   const profile = await Profile.findOne({ email });
   if (!profile) return [];
 
-  const language = await Languages.findOne({ value: profile.language });
+  const language = await Languages.findOne(
+    { value: profile.language },
+    { days: 1 }
+  );
   return language?.days ?? [];
 }
 
@@ -62,59 +65,72 @@ async function score(diffcultyKey, email, res) {
 }
 
 async function premiumScore(email, res) {
-  const profile = await Profile.findOne({ email });
-  if (misc.exsit(profile)) {
-    const language = await Languages.findOne({ value: profile.language });
-    if (misc.exsit(language)) {
-      if (language.premiumScore == -1) {
-        language.premiumScore = 1;
-      } else {
-        language.premiumScore += 1;
-      }
-    }
+  let member = await memberProvider.getPremium(email);
+  if (member == null) {
+    const profile = await Profile.findOne({ email: email });
+
+    const languageKey = profile.language;
+
+    let language = await Languages.findOne(
+      { value: languageKey },
+      { premium: 1 }
+    );
+
+    language.premium.push({
+      email: profile.email,
+      name: profile.name,
+      premiumScore: 0,
+    });
+
+    language.save();
+
+    member = [language, await memberProvider.getPremium(email)];
   }
+
+  member[1].premiumScore += 1;
+
+  member[0].save();
 
   res.send({});
 }
 
 async function getPremiumScore(email, res) {
-  const profile = await Profile.findOne({ email });
-  if (misc.exsit(profile)) {
-    const language = await Languages.findOne({ value: profile.language });
-    if (misc.exsit(language)) {
-      return res.send({
-        name: profile.name,
-        email: profile.email,
-        value: language.premiumScore < 0 ? 0 : language.premiumScore,
-      });
-    }
+  const member = await memberProvider.getPremium(email);
+
+  if (member != null) {
+    return res.send({
+      name: member[1].name,
+      email: member[1].email,
+      value: member[1].premiumScore,
+    });
   }
-  res.send({
-    email: email,
-    value: 0,
-  });
+
+  const profile = await Profile.findOne({ email: email });
+  res.send({ name: profile.name ?? "", email: email, value: 0 });
 }
 
-// get profile by email → use its language → collect all premium scores (same language)
-// response style: res([{ value: { email, premiumScore } }])
 async function getAllPremiumScores(email, res) {
-  const profile = await Profile.findOne({ email }, { language: 1 }).lean();
-  if (!misc.exsit(profile) || !misc.exsit(profile.language)) {
-    return res([]);
+  // find the caller's profile to get its language
+  const profile = await Profile.findOne({ email: email });
+  const languageKey = profile.language;
+  let language = await Languages.findOne(
+    { value: languageKey },
+    { premium: 1 }
+  );
+
+  if (!misc.exsit(language)) {
+    return res.send([]);
   }
 
-  const peers = await Profile.find(
-    { language: profile.language },
-    { name: 1, email: 1, premiumScore: 1 }
-  ).lean();
+  let premiumMembers = language.premium;
 
-  const out = peers
-    .filter((p) => misc.exsit(p.premiumScore) && p.premiumScore >= 0) // ← exclude < 0
-    .map((p) => ({
-      name: p.name,
-      email: p.email,
-      value: p.premiumScore,
-    }));
+  // same language premiumScore for all peers
+  const out = premiumMembers
+  .map((p) => ({
+    name: p.name,
+    email: p.email,
+    value: p.premiumScore,
+  }));
 
   res.send(out);
 }
