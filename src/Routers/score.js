@@ -74,8 +74,6 @@ async function getAllPremiumScores(email) {
     value: p.premiumScore,
   }));
 
-  out.sort((a, b) => b.value - a.value);
-
   return out;
 }
 
@@ -115,6 +113,8 @@ async function premiumScore(email, res) {
 
   member[1].premiumScore += 1;
 
+  member[0].premium.sort((a, b) => b.premiumScore - a.premiumScore);
+
   member[0].save();
 
   res.send({});
@@ -125,13 +125,8 @@ async function getPremiumScore(email, res) {
 
   const allSocres = await getAllPremiumScores(email);
 
-  let rank = null;
-  for (let i = 0; i < allSocres.length; i++) {
-    if (allSocres[i].email == email) {
-      rank = i + 1;
-      break;
-    }
-  }
+  const idx = out.findIndex(o => o.email === email);
+  const rank = idx === -1 ? null : idx + 1;
 
   if (member != null) {
     return res.send({
