@@ -4,6 +4,7 @@ const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const memberProvider = require("../Hendlers/Member");
 const misc = require("../Hendlers/Result");
+const { name } = require("../Schemas/Profile/ProfileSchema");
 
 router.post("/score", function (req, res) {
   const diffculty = req.body.diffculty;
@@ -19,6 +20,11 @@ router.post("/premiumScore", function (req, res) {
 router.post("/getPremiumScore", function (req, res) {
   const email = req.body.email;
   getPremiumScore(email, res);
+});
+
+router.post("/getAllPremiumScores", function (req, res) {
+  const email = req.body.email;
+  getAllPremiumScores(email, res);
 });
 
 router.post("/scoreboard", function (req, res) {
@@ -56,16 +62,61 @@ async function score(diffcultyKey, email, res) {
 }
 
 async function premiumScore(email, res) {
-  const profile = await Profile.findOne({ email: email });
-  profile.premiumScore += 1;
+  const profile = await Profile.findOne({ email });
+  if (misc.exsit(profile)) {
+    const language = await Languages.findOne({ value: profile.language });
+    if (misc.exsit(language)) {
+      if (language.premiumScore == -1) {
+        language.premiumScore = 1;
+      } else {
+        language.premiumScore += 1;
+      }
+    }
+  }
+
   res.send({});
 }
 
 async function getPremiumScore(email, res) {
-  const profile = await Profile.findOne({ email: email });
-  let result = { value: profile.premiumScore };
-  console.log(result);
-  res.send(result);
+  const profile = await Profile.findOne({ email });
+  if (misc.exsit(profile)) {
+    const language = await Languages.findOne({ value: profile.language });
+    if (misc.exsit(language)) {
+      return res.send({
+        name: profile.name,
+        email: profile.email,
+        value: language.premiumScore < 0 ? 0 : language.premiumScore,
+      });
+    }
+  }
+  res.send({
+    email: email,
+    value: 0,
+  });
+}
+
+// get profile by email → use its language → collect all premium scores (same language)
+// response style: res([{ value: { email, premiumScore } }])
+async function getAllPremiumScores(email, res) {
+  const profile = await Profile.findOne({ email }, { language: 1 }).lean();
+  if (!misc.exsit(profile) || !misc.exsit(profile.language)) {
+    return res([]);
+  }
+
+  const peers = await Profile.find(
+    { language: profile.language },
+    { name: 1, email: 1, premiumScore: 1 }
+  ).lean();
+
+  const out = peers
+    .filter((p) => misc.exsit(p.premiumScore) && p.premiumScore >= 0) // ← exclude < 0
+    .map((p) => ({
+      name: p.name,
+      email: p.email,
+      value: p.premiumScore,
+    }));
+
+  res.send(out);
 }
 
 async function place(email, res) {
