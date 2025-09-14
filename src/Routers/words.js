@@ -42,7 +42,6 @@ async function getWord(diffcultyKey, email, res) {
   const words = member[0].words;
   const word = words[words.length - 1];
   const answer = {
-    score: member[0].totalScore,
     isTimeAttack: words.length % 5 == 0,
     number: words.length - 1,
     word: {
