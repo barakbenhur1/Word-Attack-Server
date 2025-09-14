@@ -12,6 +12,12 @@ router.post("/score", function (req, res) {
   score(diffculty, email, res);
 });
 
+router.post("/getScore", function (req, res) {
+  const diffculty = req.body.diffculty;
+  const email = req.body.email;
+  getScore(diffculty, email, res);
+});
+
 router.post("/premiumScore", function (req, res) {
   const email = req.body.email;
   premiumScore(email, res);
@@ -72,7 +78,7 @@ async function getPremiumScores(email) {
     name: p.name,
     email: p.email,
     value: p.premiumScore,
-    rank: premiumMembers.findIndex(o => o.email === p.email) + 1,
+    rank: premiumMembers.findIndex((o) => o.email === p.email) + 1,
   }));
 
   return out;
@@ -87,6 +93,15 @@ async function score(diffcultyKey, email, res) {
   word.done = true;
   member[1].save();
   res.send({});
+}
+
+async function getScore(email, diffcultyKey, res) {
+  let member = await memberProvider.get(diffcultyKey, email);
+  if (member != null) {
+    res.send({ score: member[0].totalScore });
+    return;
+  }
+  res.send({ score: 0 });
 }
 
 async function premiumScore(email, res) {
@@ -124,7 +139,7 @@ async function premiumScore(email, res) {
 async function getPremiumScore(email, res) {
   const allSocres = await getPremiumScores(email);
 
-  const idx = allSocres.findIndex(o => o.email === email);
+  const idx = allSocres.findIndex((o) => o.email === email);
 
   const member = idx >= 0 ? allSocres[idx] : null;
   if (member != null) {
@@ -137,7 +152,12 @@ async function getPremiumScore(email, res) {
   }
 
   const profile = await Profile.findOne({ email: email });
-  res.send({ name: profile.name ?? "", email: email, value: 0, rank: Number.MAX_SAFE_INTEGER });
+  res.send({
+    name: profile.name ?? "",
+    email: email,
+    value: 0,
+    rank: Number.MAX_SAFE_INTEGER,
+  });
 }
 
 async function getAllPremiumScores(email, res) {
