@@ -95,7 +95,7 @@ async function score(diffcultyKey, email, res) {
   res.send({});
 }
 
-async function getScore(email, diffcultyKey, res) {
+async function getScore(diffcultyKey, email, res) {
   let member = await memberProvider.get(diffcultyKey, email);
   if (member != null) {
     res.send({ score: member[0].totalScore });
