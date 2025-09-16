@@ -108,7 +108,6 @@ async function getPremium(email) {
     language.premium.push({
       email: profile.email,
       name: profile.name,
-      premiumScore: 0,
     });
 
     language.save();
