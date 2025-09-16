@@ -97,9 +97,18 @@ async function getPremium(email) {
     { value: languageKey },
     { premium: 1 }
   );
-  
+
   if (!misc.exsit(language)) {
-    return null;
+    language = await Languages({ value: languageKey });
+
+    language.premium.push({
+      email: profile.email,
+      name: profile.name,
+      premiumScore: 0,
+    });
+
+    language.save();
+    return getPremium(email);
   }
 
   let premiumMembers = language.premium;
