@@ -100,7 +100,11 @@ async function getPremium(email) {
 
   if (!misc.exsit(language)) {
     language = await Languages({ value: languageKey });
+    language.save();
+    return getPremium(email);
+  }
 
+  if (language.premium.length == 0) {
     language.premium.push({
       email: profile.email,
       name: profile.name,
