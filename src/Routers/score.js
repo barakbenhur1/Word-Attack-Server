@@ -73,7 +73,7 @@ async function getPremiumScores(email) {
 
   let premiumMembers = language.premium;
 
-  let rank = premiumMembers.findIndex((o) => o.email === p.email) + 1;
+  let rank = premiumMembers.findIndex((o) => o.email === profile.email) + 1;
   if (!misc.exsit(rank)) {
     rank = Number.MAX_SAFE_INTEGER;
   }
