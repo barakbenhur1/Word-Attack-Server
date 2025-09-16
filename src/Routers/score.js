@@ -112,30 +112,11 @@ async function getScore(diffcultyKey, email, res) {
 async function premiumScore(email, res) {
   let member = await memberProvider.getPremium(email);
   if (member == null) {
-    const profile = await Profile.findOne({ email: email });
-
-    const languageKey = profile.language;
-
-    let language = await Languages.findOne(
-      { value: languageKey },
-      { premium: 1 }
-    );
-
-    language.premium.push({
-      email: profile.email,
-      name: profile.name,
-      premiumScore: 0,
-    });
-
-    language.save();
-
-    member = [language, await memberProvider.getPremium(email)];
+    return res.send({});
   }
 
   member[1].premiumScore += 1;
-
   member[0].premium.sort((a, b) => b.premiumScore - a.premiumScore);
-
   member[0].save();
 
   res.send({});
