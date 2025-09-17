@@ -116,6 +116,7 @@ async function premiumScore(email, res) {
   }
 
   member[0].premiumScore += 1;
+  member[1].save();
   member[1].premium.sort((a, b) => b.premiumScore - a.premiumScore);
   member[1].save();
 
