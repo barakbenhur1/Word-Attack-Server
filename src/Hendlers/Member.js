@@ -118,7 +118,7 @@ async function getPremium(email) {
   for (j = 0; j < premiumMembers.length; j++) {
     const member = premiumMembers[j];
     if (member.email == email) {
-      return [language, member];
+      return [member, language];
     }
   }
 
