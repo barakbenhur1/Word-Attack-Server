@@ -1,4 +1,5 @@
 // app.js (top of file)
+// npm run start:dev - to run 
 const path = require("path");
 const envFile =
   process.env.NODE_ENV && process.env.NODE_ENV !== "production"

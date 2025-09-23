@@ -60,14 +60,14 @@ function hasCliticWithSeenBase(raw, freqMap, language) {
 }
 
 // ===================== Public API ======================
-async function getWord(language, length, wordList) {
-  return await getFromWiki(language, wordList, length);
+async function getWord(language, length, wordList = []) {
+  return await getFromWiki(language, length, wordList);
 }
 
 module.exports = { getWord };
 
 // ===================== Wikipedia picker ======================
-async function getFromWiki(language, wordList, length, maxAttempts = 8) {
+async function getFromWiki(language, length, wordList, maxAttempts = 8) {
   const url = `https://${language}.wikipedia.org/w/api.php`;
   const params = {
     action: "query",
@@ -86,7 +86,7 @@ async function getFromWiki(language, wordList, length, maxAttempts = 8) {
 
   // Normalize blocklist (if provided as [{value}]/[string])
   const blocked = new Set(
-    Array.isArray(wordList)
+    Array.isArray(wordList) && wordList.length > 0
       ? wordList
           .map((w) => (typeof w === "string" ? w : String(w.value)))
           .map((w) => normalizeWord(w, language))

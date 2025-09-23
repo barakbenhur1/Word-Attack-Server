@@ -53,9 +53,8 @@ async function get(diffKey, email) {
               ? 5
               : 6;
 
-            diffculty.words.push(
-              await req.getWord(profile.language, length, words)
-            );
+            const word = await req.getWord(profile.language, length, words);
+            diffculty.words.push(word);
             language.save();
             return get(diffcultyKey, email);
           }
