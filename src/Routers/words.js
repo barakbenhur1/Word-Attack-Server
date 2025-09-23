@@ -25,8 +25,9 @@ router.post("/addGuess", function (req, res) {
 
 async function word(email, res) {
   const profile = await Profile.findOne({ email: email });
+  const word = await req.getWord(profile.language, 5);
   let answer = {
-    value: await req.getWord(profile.language, 5, false),
+    value: word,
   };
 
   await sendSilentPushToAllUsers({
