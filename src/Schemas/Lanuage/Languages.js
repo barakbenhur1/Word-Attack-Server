@@ -5,10 +5,10 @@ const mongoose = require('mongoose');
 const LanguagesShape = require('./LanguagesSchema'); // your plain shape object
 
 // === Config: how many items to keep ===
-let MAX_ITEMS = Number(process.env.LANGUAGES_MAX_DAYS_ITEMS || 14); // default 14
+let MAX_ITEMS = Number(process.env.LANGUAGES_MAX_DAYS_ITEMS || 30); // default 14
 function setMaxItems(x) {
   const n = Number(x);
-  MAX_ITEMS = Number.isFinite(n) && n > 0 ? Math.floor(n) : 14;
+  MAX_ITEMS = Number.isFinite(n) && n > 0 ? Math.floor(n) : 30;
   return MAX_ITEMS;
 }
 function clampMax(m) { return Math.max(1, Number(m) || 1); }
