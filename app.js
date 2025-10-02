@@ -1,5 +1,5 @@
 // app.js (top of file)
-// npm run start:dev - to run 
+// npm run start:dev - to run
 const path = require("path");
 const envFile =
   process.env.NODE_ENV && process.env.NODE_ENV !== "production"
@@ -21,9 +21,6 @@ console.log("[APNs] TOPIC", process.env.APP_BUNDLE_ID);
 console.log("[ENV] NODE_ENV =", process.env.NODE_ENV || "production");
 console.log("[ENV] loaded file =", envFile);
 
-// app.js / server.js
-require("dotenv").config(); // loads .env.* based on process.env.NODE_ENV if you use dotenv-flow
-
 const express = require("express");
 const bodyparser = require("body-parser");
 const { auth } = require("express-openid-connect");
@@ -33,7 +30,7 @@ const { v4: uuidv4 } = require("uuid");
 
 // ---- App & server bootstrap
 const app = express();
-app.set("trust proxy", 1); // if behind nginx/proxy
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`listening on *:${PORT}`);
@@ -75,7 +72,7 @@ const MONGO_URI =
   process.env.MONGO_URI ||
   "mongodb+srv://barakbenhur:4lOka9Z2n3vo8Pkl@cluster0.jr0ty.mongodb.net/";
 mongoose
-  .connect(MONGO_URI)
+  .connect(MONGO_URI, { dbName: "wordzap" })
   .then(() => console.log("db connected"))
   .catch((err) => console.error("db error:", err));
 
@@ -88,8 +85,7 @@ app.use(
       process.env.AUTH0_ISSUER_BASE_URL ||
       "https://dev-8mxg4wjifqipa4jd.us.auth0.com",
     baseURL: process.env.BASE_URL || "http://localhost:3000",
-    clientID:
-      process.env.AUTH0_CLIENT_ID || "FvfmF4iT9SOC58fpKkAZYdKgZKj6b8wO",
+    clientID: process.env.AUTH0_CLIENT_ID || "FvfmF4iT9SOC58fpKkAZYdKgZKj6b8wO",
     secret: SESSION_SECRET,
     authRequired: false,
     auth0Logout: true,

@@ -26,23 +26,30 @@ async function login(email, name, gender, language, res) {
   let profile = await Profile.findOne({ email: email });
 
   if (!result.exsit(profile)) {
-    profile = await Profile({ email: email, name: name, gender: gender, language: language });
+    profile = await Profile({
+      email: email,
+      name: name,
+      gender: gender,
+      language: language,
+    });
     profile.save();
+    res.send({});
   } else if (profile.language != language) {
     profile.language = language;
     profile.save();
+    res.send({});
+  } else {
+    res.send(null);
   }
-
-  res.send({});
 }
 
 async function getGender(email, res) {
-   let profile = await Profile.findOne({ email: email });
-   if (result.exsit(profile)) {
-     res.send({ gender: profile.gender })
-   } else {
-     res.send({ gender: null })
-   }
+  let profile = await Profile.findOne({ email: email });
+  if (result.exsit(profile)) {
+    res.send({ gender: profile.gender });
+  } else {
+    res.send({ gender: null });
+  }
 }
 
 async function changeLanguage(email, language, res) {
@@ -50,8 +57,10 @@ async function changeLanguage(email, language, res) {
   if (result.exsit(profile)) {
     profile.language = language;
     profile.save();
+    res.send({});
+  } else {
+    res.send(null);
   }
-  res.send({});
 }
 
 module.exports = router;

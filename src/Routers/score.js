@@ -4,7 +4,6 @@ const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const memberProvider = require("../Hendlers/Member");
 const misc = require("../Hendlers/Result");
-const { name } = require("../Schemas/Profile/ProfileSchema");
 
 router.post("/score", function (req, res) {
   const diffculty = req.body.diffculty;
@@ -44,14 +43,18 @@ router.post("/place", function (req, res) {
 });
 
 async function getDaysForUser(email) {
-  const profile = await Profile.findOne({ email });
-  if (!profile) return [];
+  const profile = await Profile.findOne({ email: email });
+  if (!misc.exsit(profile)) {
+    return [];
+  }
+  const languageKey = profile.language;
+  const language = await Languages.findOne({ value: languageKey }, { days: 1 });
 
-  const language = await Languages.findOne(
-    { value: profile.language },
-    { days: 1 }
-  );
-  return language?.days ?? [];
+  if (!misc.exsit(language)) {
+    return [];
+  }
+
+  return language.days;
 }
 
 async function scoreboard(email, res) {
@@ -61,8 +64,11 @@ async function scoreboard(email, res) {
 
 async function getPremiumScores(email) {
   const profile = await Profile.findOne({ email: email });
+  if (!misc.exsit(profile)) {
+    return [];
+  }
   const languageKey = profile.language;
-  let language = await Languages.findOne(
+  const language = await Languages.findOne(
     { value: languageKey },
     { premium: 1 }
   );
@@ -71,7 +77,7 @@ async function getPremiumScores(email) {
     return [];
   }
 
-  let premiumMembers = language.premium;
+  const premiumMembers = language.premium;
 
   let rank = premiumMembers.findIndex((o) => o.email === profile.email) + 1;
   if (!misc.exsit(rank)) {
