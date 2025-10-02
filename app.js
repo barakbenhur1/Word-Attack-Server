@@ -70,11 +70,15 @@ app.use("/uploads", express.static("uploads"));
 mongoose.set("strictQuery", true);
 const MONGO_URI =
   process.env.MONGO_URI ||
-  "mongodb+srv://barakbenhur:4lOka9Z2n3vo8Pkl@cluster0.jr0ty.mongodb.net/";
+  "mongodb+srv://wordzap-app:<4M9sCeV365e9VNQL>@cluster0.jr0ty.mongodb.net/wordzap";
 mongoose
   .connect(MONGO_URI, { dbName: "wordzap" })
   .then(() => console.log("db connected"))
   .catch((err) => console.error("db error:", err));
+
+  mongoose.connection.on('connected', () =>
+  console.log('[mongo] db =', mongoose.connection.name) // should print 'wordzap'
+);
 
 // ---- Auth0
 // IMPORTANT: In production use a FIXED SESSION_SECRET from env (not uuid each boot).
