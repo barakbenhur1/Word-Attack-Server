@@ -116,17 +116,46 @@ async function getScore(diffcultyKey, email, res) {
 }
 
 async function premiumScore(email, res) {
-  let member = await memberProvider.getPremium(email);
-  if (member == null) {
-    return res.send({});
+  try {
+    const result = await memberProvider.getPremium(email);
+    if (!result || !Array.isArray(result) || result.length < 2) {
+      return res.status(404).json({ ok: false, error: "Member not found" });
+    }
+
+    const [playerDoc, boardDoc] = result;
+
+    // 1) increment player's premium score
+    const inc = () => {
+      playerDoc.premiumScore = (playerDoc.premiumScore || 0) + 1;
+    };
+
+    // playerDoc is embedded → save its owner document
+    inc();
+    const owner = playerDoc.ownerDocument();
+    // If the subdoc lives inside boardDoc, 'owner' may equal boardDoc
+    // Mark the path just in case:
+    if (owner && typeof owner.markModified === "function") {
+      // Use the correct path to the array if you know it, e.g. 'premium'
+      owner.markModified("premium");
+    }
+    await boardDoc.save();
+
+    // 2) re-sort leaderboard array on the board doc (if present)
+    if (boardDoc && Array.isArray(boardDoc.premium)) {
+      boardDoc.premium.sort(
+        (a, b) => (b.premiumScore || 0) - (a.premiumScore || 0)
+      );
+      if (typeof boardDoc.markModified === "function") {
+        boardDoc.markModified("premium");
+      }
+      await boardDoc.save();
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("[premiumScore] error:", err);
+    return res.status(500).json({ ok: false, error: "Internal server error" });
   }
-
-  member[0].premiumScore += 1;
-  member[1].save();
-  member[1].premium.sort((a, b) => b.premiumScore - a.premiumScore);
-  member[1].save();
-
-  res.send({});
 }
 
 async function getPremiumScore(email, res) {
