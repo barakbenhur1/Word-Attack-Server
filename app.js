@@ -68,21 +68,25 @@ app.use("/uploads", express.static("uploads"));
 
 // ---- MongoDB
 mongoose.set("strictQuery", true);
-const MONGO_URI =
-  process.env.MONGO_URI ||
-  "mongodb+srv://wordzap-app:QQlIZcPQPEzYeIiN@cluster0.jr0ty.mongodb.net/wordZap";
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+  throw new Error("Missing MONGO_URI env");
+}
+
 mongoose
   .connect(MONGO_URI, { dbName: "wordzap" })
   .then(() => console.log("db connected"))
   .catch((err) => console.error("db error:", err));
 
-  mongoose.connection.on('connected', () =>
-  console.log('[mongo] db =', mongoose.connection.name) // should print 'wordzap'
+mongoose.connection.on(
+  "connected",
+  () => console.log("[mongo] db =", mongoose.connection.name) // should print 'wordzap'
 );
 
-const user = 'wordzap-app';
-const pass = encodeURIComponent('QQlIZcPQPEzYeIiN');
-console.log(`mongodb+srv://${user}:${pass}@cluster0.jr0ty.mongodb.net/wordZap`);
+const user = "wordzap-bbh";
+const pass = encodeURIComponent("xjnH3ibSeXKKv4gL");
+console.log(`mongodb+srv://${user}:${pass}@cluster0.jr0ty.mongodb.net/wordzap`);
 
 // ---- Auth0
 // IMPORTANT: In production use a FIXED SESSION_SECRET from env (not uuid each boot).
