@@ -33,14 +33,11 @@ async function login(email, name, gender, language, res) {
       language: language,
     });
     profile.save();
-    res.send({});
   } else if (profile.language != language) {
     profile.language = language;
     profile.save();
-    res.send({});
-  } else {
-    res.send(null);
   }
+  res.send({});
 }
 
 async function getGender(email, res) {
