@@ -86,7 +86,6 @@ mongoose.connection.on(
 
 const user = "wordzap-bbh";
 const pass = encodeURIComponent("xjnH3ibSeXKKv4gL");
-console.log(`mongodb+srv://${user}:${pass}@cluster0.jr0ty.mongodb.net/wordzap`);
 
 // ---- Auth0
 // IMPORTANT: In production use a FIXED SESSION_SECRET from env (not uuid each boot).
