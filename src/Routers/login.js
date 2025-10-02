@@ -11,6 +11,11 @@ router.post("/", function (req, res) {
   login(email, name, gender, language, res);
 });
 
+router.post("/isLoggedin", function (req, res) {
+  const email = req.body.email;
+  isLoggedin(email, res);
+});
+
 router.post("/changeLanguage", function (req, res) {
   const email = req.body.email;
   const language = req.body.language;
@@ -21,6 +26,12 @@ router.post("/gender", function (req, res) {
   const email = req.body.email;
   getGender(email, res);
 });
+
+async function isLoggedin(email, res) {
+  let profile = await Profile.findOne({ email: email });
+  const value = result.exsit(profile) ? {} : null;
+  res.send(value);
+}
 
 async function login(email, name, gender, language, res) {
   let profile = await Profile.findOne({ email: email });
