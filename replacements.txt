@@ -1,0 +1,1 @@
+regex:(mongodb\+srv://)[^@]+(@cluster0\.jr0ty\.mongodb\.net/wordZap) ==> \1***REMOVED***\2
