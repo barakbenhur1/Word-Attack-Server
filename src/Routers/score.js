@@ -135,29 +135,27 @@ async function getPremiumScore(email, res) {
   const idx = allSocres.findIndex((o) => o.email === email);
 
   const member = idx >= 0 ? allSocres[idx] : null;
-  if (member != null) {
-    return res.send({
+  if (misc.exsit(member)) {
+    res.send({
       name: member.name,
       email: member.email,
       value: member.value,
       rank: member.rank,
     });
+  } else {
+    let name = "unknowen";
+    const profile = await Profile.findOne({ email: email });
+    if (misc.exsit(profile)) {
+      name = profile.name;
+    }
+
+    res.send({
+      name: name,
+      email: email,
+      value: 0,
+      rank: Number.MAX_SAFE_INTEGER,
+    });
   }
-
-  let name = "unknowen";
-
-  const profile = await Profile.findOne({ email: email });
-  
-  if (misc.exsit(profile)) {
-    name = profile.name;
-  }
-
-  res.send({
-    name: name,
-    email: email,
-    value: 0,
-    rank: Number.MAX_SAFE_INTEGER,
-  });
 }
 
 async function getAllPremiumScores(email, res) {
