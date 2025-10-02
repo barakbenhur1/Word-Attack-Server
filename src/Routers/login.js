@@ -63,8 +63,10 @@ async function getGender(email, res) {
 async function changeLanguage(email, language, res) {
   let profile = await Profile.findOne({ email: email });
   if (result.exsit(profile)) {
-    profile.language = language;
-    profile.save();
+    if (profile.language != language) {
+      profile.language = language;
+      profile.save();
+    }
     res.send({});
   } else {
     res.send(null);
