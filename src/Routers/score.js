@@ -144,9 +144,16 @@ async function getPremiumScore(email, res) {
     });
   }
 
+  let name = "unknowen";
+
   const profile = await Profile.findOne({ email: email });
+  
+  if (misc.exsit(profile)) {
+    name = profile.name;
+  }
+
   res.send({
-    name: profile.name ?? "",
+    name: name,
     email: email,
     value: 0,
     rank: Number.MAX_SAFE_INTEGER,
