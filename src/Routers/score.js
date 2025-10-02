@@ -131,13 +131,7 @@ async function premiumScore(email, res) {
 
     // playerDoc is embedded → save its owner document
     inc();
-    const owner = playerDoc.ownerDocument();
-    // If the subdoc lives inside boardDoc, 'owner' may equal boardDoc
-    // Mark the path just in case:
-    if (owner && typeof owner.markModified === "function") {
-      // Use the correct path to the array if you know it, e.g. 'premium'
-      owner.markModified("premium");
-    }
+    boardDoc.markModified("premium");
     await boardDoc.save();
 
     // 2) re-sort leaderboard array on the board doc (if present)
