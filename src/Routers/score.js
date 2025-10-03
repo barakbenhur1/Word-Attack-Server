@@ -79,11 +79,6 @@ async function getPremiumScores(email) {
 
   const premiumMembers = language.premium;
 
-  let rank = premiumMembers.findIndex((o) => o.email === profile.email) + 1;
-  if (!misc.exsit(rank)) {
-    rank = Number.MAX_SAFE_INTEGER;
-  }
-
   // same language premiumScore for all peers
   const out = premiumMembers.map((p) => ({
     name: p.name,
