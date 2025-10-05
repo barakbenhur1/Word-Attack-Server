@@ -60,7 +60,7 @@ async function addGuess(diffcultyKey, email, guess, res) {
   const word = words[words.length - 1];
   word.guesswork.push(guess);
   word.done = guess.toLocaleLowerCase() === word.value.toLocaleLowerCase();
-  member[1].save();
+  await member[1].save();
   res.send({});
 }
 
