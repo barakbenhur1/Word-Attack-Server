@@ -59,7 +59,7 @@ async function addGuess(diffcultyKey, email, guess, res) {
   const words = member[0].words;
   const word = words[words.length - 1];
   word.guesswork.push(guess);
-  word.done = words.length == 5;
+  word.done = guess == word.value;
   member[1].save();
   res.send({});
 }
