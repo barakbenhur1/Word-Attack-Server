@@ -94,7 +94,7 @@ async function score(diffcultyKey, email, res) {
   const member = await memberProvider.get(diffcultyKey, email);
   const words = member[0].words;
   const word = words[words.length - 2];
-  const points = words.length % 5 == 0 ? 40 : 20;
+  const points = (words.length - 1) % 5 == 0 ? 40 : 20;
   member[0].totalScore += 5 * points - (word.guesswork.length - 1) * points;
   await member[1].save();
   res.send({});
