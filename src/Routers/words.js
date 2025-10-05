@@ -59,7 +59,7 @@ async function addGuess(diffcultyKey, email, guess, res) {
   const words = member[0].words;
   const word = words[words.length - 1];
   word.guesswork.push(guess);
-  word.done = guess.toLocaleLowerCase() === word.value.toLocaleLowerCase();
+  word.done = word.guesswork.length === 5 || guess.toLocaleLowerCase() === word.value.toLocaleLowerCase();
   await member[1].save();
   res.send({});
 }
