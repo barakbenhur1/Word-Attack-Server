@@ -44,9 +44,19 @@ async function login(uniqe, name, gender, language, res) {
       language: language,
     });
     profile.save();
-  } else if (profile.language != language) {
-    profile.language = language;
-    profile.save();
+  } else {
+    let save = false;
+    if (profile.language != language) {
+      profile.language = language;
+      save = true;
+    }
+    if (profile.name != name) {
+      profile.name = name;
+      save;
+    }
+    if (save) {
+      profile.save();
+    }
   }
   res.send({});
 }
