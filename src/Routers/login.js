@@ -52,7 +52,7 @@ async function login(uniqe, name, gender, language, res) {
     }
     if (profile.name.length > 0 && profile.name != name) {
       profile.name = name;
-      save;
+      save = true;
     }
     if (save) {
       profile.save();
