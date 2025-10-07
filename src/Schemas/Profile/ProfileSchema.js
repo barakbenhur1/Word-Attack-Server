@@ -1,5 +1,5 @@
 const schema = {
-    email: String,
+    uniqe: String,
     name: String,
     gender: String,
     language: String,

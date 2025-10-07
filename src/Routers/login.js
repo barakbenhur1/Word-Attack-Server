@@ -4,41 +4,41 @@ const Profile = require("../Schemas/Profile/Profile");
 const result = require("../Hendlers/Result");
 
 router.post("/", function (req, res) {
-  const email = req.body.email;
+  const uniqe = req.body.uniqe;
   const name = req.body.name;
   const gender = req.body.gender;
   const language = req.body.language;
-  login(email, name, gender, language, res);
+  login(uniqe, name, gender, language, res);
 });
 
 router.post("/isLoggedin", function (req, res) {
-  const email = req.body.email;
-  isLoggedin(email, res);
+  const uniqe = req.body.uniqe;
+  isLoggedin(uniqe, res);
 });
 
 router.post("/changeLanguage", function (req, res) {
-  const email = req.body.email;
+  const uniqe = req.body.uniqe;
   const language = req.body.language;
-  changeLanguage(email, language, res);
+  changeLanguage(uniqe, language, res);
 });
 
 router.post("/gender", function (req, res) {
-  const email = req.body.email;
-  getGender(email, res);
+  const uniqe = req.body.uniqe;
+  getGender(uniqe, res);
 });
 
-async function isLoggedin(email, res) {
-  let profile = await Profile.findOne({ email: email });
+async function isLoggedin(uniqe, res) {
+  let profile = await Profile.findOne({ uniqe: uniqe });
   const value = result.exsit(profile) ? {} : null;
   res.send(value);
 }
 
-async function login(email, name, gender, language, res) {
-  let profile = await Profile.findOne({ email: email });
+async function login(uniqe, name, gender, language, res) {
+  let profile = await Profile.findOne({ uniqe: uniqe });
 
   if (!result.exsit(profile)) {
     profile = await Profile({
-      email: email,
+      uniqe: uniqe,
       name: name,
       gender: gender,
       language: language,
@@ -51,8 +51,8 @@ async function login(email, name, gender, language, res) {
   res.send({});
 }
 
-async function getGender(email, res) {
-  let profile = await Profile.findOne({ email: email });
+async function getGender(uniqe, res) {
+  let profile = await Profile.findOne({ uniqe: uniqe });
   if (result.exsit(profile)) {
     res.send({ gender: profile.gender });
   } else {
@@ -60,8 +60,8 @@ async function getGender(email, res) {
   }
 }
 
-async function changeLanguage(email, language, res) {
-  let profile = await Profile.findOne({ email: email });
+async function changeLanguage(uniqe, language, res) {
+  let profile = await Profile.findOne({ uniqe: uniqe });
   if (result.exsit(profile)) {
     if (profile.language != language) {
       profile.language = language;

@@ -7,43 +7,43 @@ const misc = require("../Hendlers/Result");
 
 router.post("/score", function (req, res) {
   const diffculty = req.body.diffculty;
-  const email = req.body.email;
-  score(diffculty, email, res);
+  const uniqe = req.body.uniqe;
+  score(diffculty, uniqe, res);
 });
 
 router.post("/getScore", function (req, res) {
   const diffculty = req.body.diffculty;
-  const email = req.body.email;
-  getScore(diffculty, email, res);
+  const uniqe = req.body.uniqe;
+  getScore(diffculty, uniqe, res);
 });
 
 router.post("/premiumScore", function (req, res) {
-  const email = req.body.email;
-  premiumScore(email, res);
+  const uniqe = req.body.uniqe;
+  premiumScore(uniqe, res);
 });
 
 router.post("/getPremiumScore", function (req, res) {
-  const email = req.body.email;
-  getPremiumScore(email, res);
+  const uniqe = req.body.uniqe;
+  getPremiumScore(uniqe, res);
 });
 
 router.post("/getAllPremiumScores", function (req, res) {
-  const email = req.body.email;
-  getAllPremiumScores(email, res);
+  const uniqe = req.body.uniqe;
+  getAllPremiumScores(uniqe, res);
 });
 
 router.post("/scoreboard", function (req, res) {
-  const email = req.body.email;
-  scoreboard(email, res);
+  const uniqe = req.body.uniqe;
+  scoreboard(uniqe, res);
 });
 
 router.post("/place", function (req, res) {
-  const email = req.body.email;
-  place(email, res);
+  const uniqe = req.body.uniqe;
+  place(uniqe, res);
 });
 
-async function getDaysForUser(email) {
-  const profile = await Profile.findOne({ email: email });
+async function getDaysForUser(uniqe) {
+  const profile = await Profile.findOne({ uniqe: uniqe });
   if (!misc.exsit(profile)) {
     return [];
   }
@@ -57,13 +57,13 @@ async function getDaysForUser(email) {
   return language.days;
 }
 
-async function scoreboard(email, res) {
-  const days = await getDaysForUser(email);
+async function scoreboard(uniqe, res) {
+  const days = await getDaysForUser(uniqe);
   res.send(days);
 }
 
-async function getPremiumScores(email) {
-  const profile = await Profile.findOne({ email: email });
+async function getPremiumScores(uniqe) {
+  const profile = await Profile.findOne({ uniqe: uniqe });
   if (!misc.exsit(profile)) {
     return [];
   }
@@ -82,16 +82,16 @@ async function getPremiumScores(email) {
   // same language premiumScore for all peers
   const out = premiumMembers.map((p) => ({
     name: p.name,
-    email: p.email,
+    uniqe: p.uniqe,
     value: p.premiumScore,
-    rank: premiumMembers.findIndex((o) => o.email === p.email) + 1,
+    rank: premiumMembers.findIndex((o) => o.uniqe === p.uniqe) + 1,
   }));
 
   return out;
 }
 
-async function score(diffcultyKey, email, res) {
-  const member = await memberProvider.get(diffcultyKey, email);
+async function score(diffcultyKey, uniqe, res) {
+  const member = await memberProvider.get(diffcultyKey, uniqe);
   const words = member[0].words;
   const word = words[words.length - 2];
   const points = (words.length - 1) % 5 == 0 ? 40 : 20;
@@ -100,8 +100,8 @@ async function score(diffcultyKey, email, res) {
   res.send({});
 }
 
-async function getScore(diffcultyKey, email, res) {
-  let member = await memberProvider.get(diffcultyKey, email);
+async function getScore(diffcultyKey, uniqe, res) {
+  let member = await memberProvider.get(diffcultyKey, uniqe);
   if (member != null) {
     res.send({ score: member[0].totalScore });
     return;
@@ -109,9 +109,9 @@ async function getScore(diffcultyKey, email, res) {
   res.send({ score: 0 });
 }
 
-async function premiumScore(email, res) {
+async function premiumScore(uniqe, res) {
   try {
-    const result = await memberProvider.getPremium(email);
+    const result = await memberProvider.getPremium(uniqe);
     if (!result || !Array.isArray(result) || result.length < 2) {
       return res.status(404).json({ ok: false, error: "Member not found" });
     }
@@ -146,44 +146,44 @@ async function premiumScore(email, res) {
   }
 }
 
-async function getPremiumScore(email, res) {
-  const allSocres = await getPremiumScores(email);
+async function getPremiumScore(uniqe, res) {
+  const allSocres = await getPremiumScores(uniqe);
 
-  const idx = allSocres.findIndex((o) => o.email === email);
+  const idx = allSocres.findIndex((o) => o.uniqe === uniqe);
 
   const member = idx >= 0 ? allSocres[idx] : null;
   if (misc.exsit(member)) {
     res.send({
       name: member.name,
-      email: member.email,
+      uniqe: member.uniqe,
       value: member.value,
       rank: member.rank,
     });
   } else {
     let name = "unknowen";
-    const profile = await Profile.findOne({ email: email });
+    const profile = await Profile.findOne({ uniqe: uniqe });
     if (misc.exsit(profile)) {
       name = profile.name;
     }
 
     res.send({
       name: name,
-      email: email,
+      uniqe: uniqe,
       value: 0,
       rank: Number.MAX_SAFE_INTEGER,
     });
   }
 }
 
-async function getAllPremiumScores(email, res) {
+async function getAllPremiumScores(uniqe, res) {
   // find the caller's profile to get its language
-  const out = await getPremiumScores(email);
+  const out = await getPremiumScores(uniqe);
   res.send(out);
 }
 
-async function place(email, res) {
+async function place(uniqe, res) {
   try {
-    const days = await getDaysForUser(email);
+    const days = await getDaysForUser(uniqe);
     if (!days.length) {
       return res.status(404).send({ easy: null, medium: null, hard: null });
     }
@@ -206,7 +206,7 @@ async function place(email, res) {
 
       const idx = sorted.findIndex(
         (m) =>
-          String(m.email || "").toLowerCase() === String(email).toLowerCase()
+          String(m.uniqe || "").toLowerCase() === String(uniqe).toLowerCase()
       );
 
       if (idx >= 0) {
