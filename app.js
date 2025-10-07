@@ -84,9 +84,6 @@ mongoose.connection.on(
   () => console.log("[mongo] db =", mongoose.connection.name) // should print 'wordzap'
 );
 
-const user = "wordzap-bbh";
-const pass = encodeURIComponent("xjnH3ibSeXKKv4gL");
-
 // ---- Auth0
 // IMPORTANT: In production use a FIXED SESSION_SECRET from env (not uuid each boot).
 const SESSION_SECRET = process.env.SESSION_SECRET || uuidv4();
