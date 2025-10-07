@@ -54,6 +54,10 @@ async function login(uniqe, name, gender, language, res) {
       profile.name = name;
       save = true;
     }
+    if (profile.gender.length > 0 && profile.gender != gender) {
+      profile.gender = gender;
+      save = true;
+    }
     if (save) {
       profile.save();
     }
