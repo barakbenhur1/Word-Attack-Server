@@ -1,3 +1,5 @@
+const { uniqe } = require("../Profile/ProfileSchema");
+
 const Word = {
   value: String,
   guesswork: { type: [String], default: [] },
@@ -5,14 +7,14 @@ const Word = {
 };
 
 const Member = {
-  email: String,
+  uniqe: String,
   name: String,
   totalScore:{ type: Number, default: 0 },
   words: { type: [Word], default: [] },
 };
 
 const PremiumMember = {
-  email: String,
+  uniqe: String,
   name: String,
   premiumScore:{ type: Number, default: 0 },
 };

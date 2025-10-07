@@ -6,14 +6,14 @@ const mongoose = require("mongoose");
 
 // ---------- Mongoose model ----------
 const DeviceSchema = new mongoose.Schema({
-  email: { type: String, index: true },
+  uniqe: { type: String, index: true },
   token: { type: String, unique: true },
   environment: { type: String, enum: ["sandbox", "prod"], required: true },
   bundleId: { type: String, default: process.env.APP_BUNDLE_ID || "com.barak.wordzap" },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
-DeviceSchema.index({ email: 1, environment: 1 });
+DeviceSchema.index({ uniqe: 1, environment: 1 });
 const Device = mongoose.models.Device || mongoose.model("Device", DeviceSchema);
 
 // ---------- Env ----------
@@ -75,9 +75,9 @@ async function sendSilentPush({ token, environment, payload = {}, topic = DEFAUL
   });
 }
 
-/** Send to every stored device for one email */
-async function sendSilentPushToUser(email, payload = {}) {
-  const devices = await Device.find({ email }).lean();
+/** Send to every stored device for one uniqe */
+async function sendSilentPushToUser(uniqe, payload = {}) {
+  const devices = await Device.find({ uniqe }).lean();
   const results = [];
   for (const d of devices) {
     try {
@@ -182,19 +182,19 @@ function bindApnsRoutes(app) {
   }
 
   // Register/update a device
-  // POST /device/register { email, token, environment: "sandbox"|"prod", bundleId? }
+  // POST /device/register { uniqe, token, environment: "sandbox"|"prod", bundleId? }
   app.post("/device/register", async (req, res) => {
     try {
-      const { email, token, environment, bundleId } = req.body || {};
-      if (!email || !token || !environment) {
-        return res.status(400).json({ error: "missing email|token|environment" });
+      const { uniqe, token, environment, bundleId } = req.body || {};
+      if (!uniqe || !token || !environment) {
+        return res.status(400).json({ error: "missing uniqe|token|environment" });
       }
       const now = new Date();
       await Device.updateOne(
         { token },
         {
           $set: {
-            email, token, environment,
+            uniqe, token, environment,
             bundleId: bundleId || DEFAULT_TOPIC,
             updatedAt: now
           },
@@ -227,13 +227,13 @@ function bindApnsRoutes(app) {
   });
 
   // Send to all devices for one user
-  // POST /push/user { email, type?, args? }
+  // POST /push/user { uniqe, type?, args? }
   app.post("/push/user", async (req, res) => {
     try {
       if (req.get("X-API-Key") !== PUSH_API_KEY) return res.status(401).json({ error: "unauthorized" });
-      const { email, type, args } = req.body || {};
-      if (!email) return res.status(400).json({ error: "missing email" });
-      const results = await sendSilentPushToUser(email, { type, args });
+      const { uniqe, type, args } = req.body || {};
+      if (!uniqe) return res.status(400).json({ error: "missing uniqe" });
+      const results = await sendSilentPushToUser(uniqe, { type, args });
       return res.json({ status: "done", count: results.length, results });
     } catch (err) {
       console.error("APNs error:", err);
@@ -256,11 +256,11 @@ function bindApnsRoutes(app) {
     }
   });
 
-  // Debug: list devices (optionally by email/env)
+  // Debug: list devices (optionally by uniqe/env)
   app.get("/devices", async (req, res) => {
     if (req.get("X-API-Key") !== PUSH_API_KEY) return res.status(401).json({ error: "unauthorized" });
     const q = {};
-    if (req.query.email) q.email = req.query.email;
+    if (req.query.uniqe) q.uniqe = req.query.uniqe;
     if (req.query.environment) q.environment = req.query.environment;
     const docs = await Device.find(q).lean();
     res.json(docs);

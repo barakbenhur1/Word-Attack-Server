@@ -4,18 +4,18 @@ const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const req = require("../Hendlers/Request");
 
-async function get(diffKey, email) {
+async function get(diffKey, uniqe) {
   const dayKey = moment().format("DD/MM/YYYY");
   const diffcultyKey = misc.cleanText(diffKey);
 
-  const profile = await Profile.findOne({ email: email });
+  const profile = await Profile.findOne({ uniqe: uniqe });
   const languageKey = profile.language;
   let language = await Languages.findOne({ value: languageKey }, { days: 1 });
 
   if (!misc.exsit(language)) {
     language = await Languages({ value: languageKey });
     language.save();
-    return get(diffcultyKey, email);
+    return get(diffcultyKey, uniqe);
   }
 
   let days = language.days;
@@ -23,14 +23,14 @@ async function get(diffKey, email) {
   if (days.length == 0) {
     days.push({ value: dayKey, difficulties: [] });
     language.save();
-    return get(diffcultyKey, email);
+    return get(diffcultyKey, uniqe);
   }
 
   const day = days[days.length - 1];
   if (day.value != dayKey) {
     days.push({ value: dayKey });
     language.save();
-    return get(diffcultyKey, email);
+    return get(diffcultyKey, uniqe);
   }
 
   let difficulties = day.difficulties;
@@ -43,7 +43,7 @@ async function get(diffKey, email) {
 
       for (k = 0; k < members.length; k++) {
         const member = members[k];
-        if (member.email == email) {
+        if (member.uniqe == uniqe) {
           let words = member.words;
 
           if (diffculty.words.length == words.length) {
@@ -56,7 +56,7 @@ async function get(diffKey, email) {
             const word = await req.getWord(profile.language, length, words);
             diffculty.words.push(word);
             language.save();
-            return get(diffcultyKey, email);
+            return get(diffcultyKey, uniqe);
           }
 
           if (words.length == 0 || words[words.length - 1].done) {
@@ -66,7 +66,7 @@ async function get(diffKey, email) {
               done: false,
             });
             language.save();
-            return get(diffcultyKey, email);
+            return get(diffcultyKey, uniqe);
           }
 
           return [member, language];
@@ -74,23 +74,23 @@ async function get(diffKey, email) {
       }
 
       members.push({
-        email: profile.email,
+        uniqe: profile.uniqe,
         name: profile.name,
         totalScore: 0,
         words: [],
       });
       language.save();
-      return get(diffcultyKey, email);
+      return get(diffcultyKey, uniqe);
     }
   }
 
   difficulties.push({ value: diffcultyKey, words: [], members: [] });
   language.save();
-  return get(diffcultyKey, email);
+  return get(diffcultyKey, uniqe);
 }
 
-async function getPremium(email) {
-  const profile = await Profile.findOne({ email: email });
+async function getPremium(uniqe) {
+  const profile = await Profile.findOne({ uniqe: uniqe });
   const languageKey = profile.language;
   let language = await Languages.findOne(
     { value: languageKey },
@@ -100,23 +100,23 @@ async function getPremium(email) {
   if (!misc.exsit(language)) {
     language = await Languages({ value: languageKey });
     language.save();
-    return getPremium(email);
+    return getPremium(uniqe);
   }
 
   if (language.premium.length == 0) {
     language.premium.push({
-      email: profile.email,
+      uniqe: profile.uniqe,
       name: profile.name,
     });
 
     language.save();
-    return getPremium(email);
+    return getPremium(uniqe);
   }
 
   let premiumMembers = language.premium;
   for (j = 0; j < premiumMembers.length; j++) {
     const member = premiumMembers[j];
-    if (member.email == email) {
+    if (member.uniqe == uniqe) {
       return [member, language];
     }
   }
