@@ -40,8 +40,5 @@
   },
   "engines": {
     "node": ">=18.17"
-  },
-  "optionalDependencies": {
-    "onnxruntime-node": "^1.23.0"
   }
 }
