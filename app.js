@@ -19,7 +19,6 @@ console.log("[ENV] NODE_ENV =", process.env.NODE_ENV || "production");
 console.log("[ENV] loaded file =", envFile);
 
 const express = require("express");
-const bodyparser = require("body-parser");
 const { auth } = require("express-openid-connect");
 const https = require("https");
 const mongoose = require("mongoose");
@@ -63,8 +62,7 @@ https
 
 // ---------- Parsers & static ----------
 app.use(express.json({ limit: "1mb" }));
-app.use(bodyparser.urlencoded({ extended: false }));
-app.use(bodyparser.json());
+app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static("uploads"));
 
