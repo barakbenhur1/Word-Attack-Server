@@ -8,15 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY package*.json ./
 
-# Use lockfile if present; otherwise fallback (avoids npm ci error)
-RUN [ -f package-lock.json ] && npm ci --omit=dev || npm install --omit=dev
+# No lockfile in context -> npm install
+RUN npm install --omit=dev
 
-# Fail fast if native ORT can't load (ensures we don't fall back to WASM silently)
+# Make sure native ORT resolves (optional but nice)
 RUN node -e "require('onnxruntime-node'); console.log('onnxruntime-node OK')"
 
 COPY . .
 
-# ---- runtime stage ----
+# ---- runtime ----
 FROM node:20-slim AS runner
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,7 +29,7 @@ WORKDIR /app
 COPY --from=builder /app ./
 EXPOSE 3000
 
-# keep RAM tight
+# Keep memory low
 ENV AI_MAX_CONCURRENCY=1
 ENV MAX_TOKENS=48
 ENV ORT_FORCE_WASM=0
