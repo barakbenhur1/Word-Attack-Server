@@ -1,50 +1,38 @@
-# ---------- builder ----------
+# ---- build stage ----
 FROM node:20-slim AS builder
-WORKDIR /app
 
-# system deps (small) – libgomp1 helps with onnxruntime native CPU kernels
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libgomp1 && \
-    rm -rf /var/lib/apt/lists/*
+    ca-certificates curl libgomp1 libstdc++6 libatomic1 \
+ && rm -rf /var/lib/apt/lists/*
 
-# only copy manifests for caching
+WORKDIR /app
 COPY package*.json ./
 
-# reproducible install
-RUN npm ci --omit=dev
+# Use lockfile if present; otherwise fallback (avoids npm ci error)
+RUN [ -f package-lock.json ] && npm ci --omit=dev || npm install --omit=dev
 
-# copy app src
+# Fail fast if native ORT can't load (ensures we don't fall back to WASM silently)
+RUN node -e "require('onnxruntime-node'); console.log('onnxruntime-node OK')"
+
 COPY . .
 
-# ---------- runner ----------
+# ---- runtime stage ----
 FROM node:20-slim AS runner
-WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libgomp1 && \
-    rm -rf /var/lib/apt/lists/*
+    ca-certificates libgomp1 libstdc++6 libatomic1 \
+ && rm -rf /var/lib/apt/lists/*
 
-# copy deps and app from builder
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app ./
-
-# environment defaults (can be overridden in Render)
 ENV NODE_ENV=production
 ENV PORT=3000
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
 
-# Keep Node heap modest so we don't spike over 512 MB
+# keep RAM tight
+ENV AI_MAX_CONCURRENCY=1
+ENV MAX_TOKENS=48
+ENV ORT_FORCE_WASM=0
 ENV NODE_OPTIONS=--max-old-space-size=420
 
-# A few knobs we rely on in your ai.js
-# - auto: load from disk if present, else download to RAM; we’ll download to /tmp
-ENV MODEL_LOAD_MODE=auto
-ENV MODEL_DIR=/tmp/models
-
-# Use native backend by default
-ENV ORT_FORCE_WASM=0
-ENV ORT_WASM_THREADS=1
-ENV AI_MAX_CONCURRENCY=1
-ENV MAX_TOKENS=64
-
-EXPOSE 3000
 CMD ["node", "app.js"]
