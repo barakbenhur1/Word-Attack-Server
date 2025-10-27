@@ -1,33 +1,50 @@
-# ---- Base ----
-FROM node:20-slim
-
-# Optional: keep image minimal and TLS happy
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tini ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-
+# ---------- builder ----------
+FROM node:20-slim AS builder
 WORKDIR /app
 
-# ---- Dependencies layer (use lockfile for reproducible builds) ----
-COPY package*.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+# system deps (small) – libgomp1 helps with onnxruntime native CPU kernels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
-# ---- App layer ----
+# only copy manifests for caching
+COPY package*.json ./
+
+# reproducible install
+RUN npm ci --omit=dev
+
+# copy app src
 COPY . .
 
-# Runtime envs (safe defaults; override in Render dashboard)
-ENV NODE_ENV=production \
-    # keep Node heap modest so WASM/ORT has room in 512MB instances
-    NODE_OPTIONS="--max-old-space-size=384" \
-    ORT_WASM_THREADS=1 \
-    MODEL_LOAD_MODE=memory \
-    MAX_TOKENS=48
+# ---------- runner ----------
+FROM node:20-slim AS runner
+WORKDIR /app
 
-# Render maps PORT for you; your code already reads process.env.PORT
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# copy deps and app from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app ./
+
+# environment defaults (can be overridden in Render)
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Keep Node heap modest so we don't spike over 512 MB
+ENV NODE_OPTIONS=--max-old-space-size=420
+
+# A few knobs we rely on in your ai.js
+# - auto: load from disk if present, else download to RAM; we’ll download to /tmp
+ENV MODEL_LOAD_MODE=auto
+ENV MODEL_DIR=/tmp/models
+
+# Use native backend by default
+ENV ORT_FORCE_WASM=0
+ENV ORT_WASM_THREADS=1
+ENV AI_MAX_CONCURRENCY=1
+ENV MAX_TOKENS=64
+
 EXPOSE 3000
-
-# Use tini as PID 1 (handles signals / clean shutdowns)
-ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Start the server
 CMD ["node", "app.js"]
