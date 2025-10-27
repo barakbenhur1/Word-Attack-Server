@@ -11,7 +11,7 @@ try { ort = require("onnxruntime-node"); ORT_BACKEND = "node"; }
 catch { ort = require("onnxruntime-web"); ORT_BACKEND = "wasm"; }
 
 // ---------------- Env / paths ----------------
-const MODEL_DIR = process.env.MODEL_DIR || "./models";
+const MODEL_DIR = process.env.MODEL_DIR || "/tmp/models";
 const MODEL_NAME = process.env.MODEL_NAME || "wordzap.onnx";
 const TOKENIZER_NAME = process.env.TOKENIZER_NAME || "tokenizer.json";
 const MODEL_PATH = process.env.MODEL_PATH || path.join(MODEL_DIR, MODEL_NAME);
@@ -20,6 +20,17 @@ const MODEL_URL_MODEL = process.env.MODEL_URL_MODEL;
 const MODEL_URL_TOKENIZER = process.env.MODEL_URL_TOKENIZER;
 const MODEL_LOAD_MODE = (process.env.MODEL_LOAD_MODE || "auto").toLowerCase(); // "memory" | "auto"
 const MAX_TOKENS = Number(process.env.MAX_TOKENS || 84);
+
+// Concurrency gate
+const AI_MAX_CONCURRENCY = parseInt(process.env.AI_MAX_CONCURRENCY || "1", 10);
+let _running = 0;
+const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
+async function withGate(fn) {
+  while (_running >= AI_MAX_CONCURRENCY) await _sleep(5);
+  _running++;
+  try { return await fn(); }
+  finally { _running--; }
+}
 
 // ---------------- Helpers (HTTP + loading) ----------------
 function httpsGetFollow(url, headers = {}, maxRedirects = 5) {
@@ -33,7 +44,7 @@ function httpsGetFollow(url, headers = {}, maxRedirects = 5) {
       headers: { "User-Agent": "wordzap/1.0", ...headers },
     }, (res) => {
       const code = res.statusCode || 0;
-      if ([301,302,303,307,308].includes(code)) {
+      if ([301, 302, 303, 307, 308].includes(code)) {
         if (maxRedirects <= 0) { res.resume(); return reject(new Error("Too many redirects")); }
         const loc = res.headers.location; res.resume();
         if (!loc) return reject(new Error("Redirect with no Location"));
@@ -49,36 +60,60 @@ function httpsGetFollow(url, headers = {}, maxRedirects = 5) {
   });
 }
 
-async function ensureModelBuffers() {
-  // memory mode => always fetch to RAM
-  if (MODEL_LOAD_MODE === "memory") {
-    if (!MODEL_URL_MODEL || !MODEL_URL_TOKENIZER)
-      throw new Error("Set MODEL_URL_MODEL and MODEL_URL_TOKENIZER for memory mode");
-    const hdr = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
-    const [modelBytes, tokBuf] = await Promise.all([
-      httpsGetFollow(MODEL_URL_MODEL, hdr),
-      httpsGetFollow(MODEL_URL_TOKENIZER, hdr),
-    ]);
-    return { modelBytes, tokenizerJSON: tokBuf.toString("utf8"), storage: "memory" };
+async function downloadToFile(url, outPath, headers = {}) {
+  await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+  await new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.get({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + (u.search || ""),
+      headers: { "User-Agent": "wordzap/1.0", ...headers },
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return downloadToFile(new URL(res.headers.location, url).toString(), outPath, headers)
+          .then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+      }
+      const file = fs.createWriteStream(outPath);
+      res.pipe(file);
+      file.on("finish", () => file.close(resolve));
+      file.on("error", reject);
+    });
+    req.on("error", reject);
+  });
+}
+
+async function ensureModelLocal() {
+  const hdr = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+  const wantDisk = MODEL_LOAD_MODE !== "memory";
+
+  const haveDisk = fs.existsSync(MODEL_PATH) && fs.existsSync(TOKENIZER_PATH);
+  if (wantDisk && haveDisk) {
+    return { storage: "disk", modelPath: MODEL_PATH, tokenizerPath: TOKENIZER_PATH };
   }
 
-  // auto => disk if available, else fetch to RAM
-  const hasDisk = fs.existsSync(MODEL_PATH) && fs.existsSync(TOKENIZER_PATH);
-  if (hasDisk) {
-    return {
-      modelBytes: await fs.promises.readFile(MODEL_PATH),
-      tokenizerJSON: await fs.promises.readFile(TOKENIZER_PATH, "utf8"),
-      storage: "disk",
-    };
+  if (wantDisk) {
+    if (!MODEL_URL_MODEL || !MODEL_URL_TOKENIZER) throw new Error("Set MODEL_URL_MODEL and MODEL_URL_TOKENIZER");
+    await downloadToFile(MODEL_URL_MODEL, MODEL_PATH, hdr);
+    await downloadToFile(MODEL_URL_TOKENIZER, TOKENIZER_PATH, hdr);
+    return { storage: "disk", modelPath: MODEL_PATH, tokenizerPath: TOKENIZER_PATH };
   }
-  if (!MODEL_URL_MODEL || !MODEL_URL_TOKENIZER)
-    throw new Error("MODEL files not found on disk and URLs not provided");
-  const hdr = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+
+  // memory mode
+  if (!MODEL_URL_MODEL || !MODEL_URL_TOKENIZER) {
+    throw new Error("MODEL_URL_MODEL and MODEL_URL_TOKENIZER required for memory mode");
+  }
   const [modelBytes, tokBuf] = await Promise.all([
     httpsGetFollow(MODEL_URL_MODEL, hdr),
     httpsGetFollow(MODEL_URL_TOKENIZER, hdr),
   ]);
-  return { modelBytes, tokenizerJSON: tokBuf.toString("utf8"), storage: "memory" };
+  return { storage: "memory", modelBytes, tokenizerJSON: tokBuf.toString("utf8") };
 }
 
 // ---------------- Tokenizer (lite) ----------------
@@ -121,7 +156,7 @@ class TokenizerLite {
     this.eosId = this.tok2id.get("</s>") ?? null;
     this.unkId = this.tok2id.get("<unk>") ?? 0;
 
-    // merges (optional)
+    // merges (optional; we don't fully use them in this lite shim)
     const merges = model.merges || [];
     for (let rank = 0; rank < merges.length; rank++) {
       const m = merges[rank]; let a, b;
@@ -519,31 +554,49 @@ function buildMaps() {
 }
 
 // ---------------- Boot ----------------
-const aiReady = (async () => {
-  const { modelBytes, tokenizerJSON, storage } = await ensureModelBuffers();
-  STORAGE_KIND = storage;
+const sessionOptsNode = {
+  graphOptimizationLevel: "basic",
+  executionMode: "sequential",
+  intraOpNumThreads: 1,
+  interOpNumThreads: 1,
+  enableMemPattern: false,
+  enableCpuMemArena: false,
+};
+const sessionOptsWasm = {
+  graphOptimizationLevel: "basic",
+  executionProviders: ["wasm"],
+};
 
+const aiReady = (async () => {
+  const local = await ensureModelLocal();
+  STORAGE_KIND = local.storage;
+
+  // tokenizer
+  let tokenizerJSON;
+  if (local.storage === "disk") {
+    tokenizerJSON = await fs.promises.readFile(local.tokenizerPath, "utf8");
+  } else {
+    tokenizerJSON = local.tokenizerJSON;
+  }
   tokenizer = await TokenizerLite.fromJSON(tokenizerJSON);
 
-  if (ORT_BACKEND === "node") {
-    try {
-      // onnxruntime-node can load from bytes on recent builds; if not, we fall back to WASM.
-      session = await ort.InferenceSession.create(modelBytes, { graphOptimizationLevel: "all" });
-      console.log("[AI] onnxruntime-node OK");
-    } catch (e) {
-      console.warn("[AI] node backend failed; switching to WASM:", e?.message || e);
-      ORT_BACKEND = "wasm";
-    }
-  }
-  if (ORT_BACKEND === "wasm") {
+  // session
+  if (ORT_BACKEND === "node" && local.storage === "disk") {
+    // ✅ memory-mapped file load
+    session = await ort.InferenceSession.create(local.modelPath, sessionOptsNode);
+    console.log("[AI] onnxruntime-node path OK");
+  } else if (ORT_BACKEND === "node" && local.storage === "memory") {
+    session = await ort.InferenceSession.create(local.modelBytes, sessionOptsNode);
+    console.log("[AI] onnxruntime-node bytes OK");
+  } else {
     if (ort.env && ort.env.wasm) {
       ort.env.wasm.numThreads = Number(process.env.ORT_WASM_THREADS || 1);
       ort.env.wasm.simd = true;
     }
-    session = await ort.InferenceSession.create(modelBytes, {
-      executionProviders: ["wasm"],
-      graphOptimizationLevel: "all",
-    });
+    const bytes = local.storage === "disk"
+      ? await fs.promises.readFile(local.modelPath) // WASM needs bytes
+      : local.modelBytes;
+    session = await ort.InferenceSession.create(bytes, sessionOptsWasm);
     console.log("[AI] onnxruntime-web (WASM) OK");
   }
 
@@ -574,40 +627,44 @@ async function respondHealth(res) {
     wordsHE: wordTokenIdsHE.length,
   });
 }
-router.get("/health", async (_req, res) => { try { await respondHealth(res); } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); } });
-router.get("/aiHealth", async (_req, res) => { try { await respondHealth(res); } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); } });
+router.get("/health", (_req, res) => withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) })));
+router.get("/aiHealth", (_req, res) => withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) })));
 
 // Unified guess handler with strict sanitization
 router.post("/aiGuess", async (req, res) => {
   try {
-    await aiReady;
+    const result = await withGate(async () => {
+      await aiReady;
 
-    const body = req.body || {};
-    const history = Array.isArray(body.history) ? body.history : [];
-    const lang = body.lang === "he" ? "he" : "en";
-    const difficulty = ["easy","medium","hard","boss"].includes(body.difficulty) ? body.difficulty : "medium";
+      const body = req.body || {};
+      const history = Array.isArray(body.history) ? body.history : [];
+      const lang = body.lang === "he" ? "he" : "en";
+      const difficulty = ["easy","medium","hard","boss"].includes(body.difficulty) ? body.difficulty : "medium";
 
-    // If last guess is all green, just echo it back (sanitized)
-    if (history.length) {
-      const last = history[history.length - 1];
-      const greens = normalizeFeedback(last.feedback || "", 5);
-      if (greens.every((x) => x === "green")) {
-        const safe = sanitizeFinal(String(last.word || "").toLowerCase(), lang);
-        return res.json({ guess: safe || fallbackWord(lang), mode: "history" });
+      // If last guess is all green, just echo it back (sanitized)
+      if (history.length) {
+        const last = history[history.length - 1];
+        const greens = normalizeFeedback(last.feedback || "", 5);
+        if (greens.every((x) => x === "green")) {
+          const safeDone = sanitizeFinal(String(last.word || "").toLowerCase(), lang);
+          return { guess: safeDone || fallbackWord(lang), mode: "history" };
+        }
       }
-    }
 
-    let guess;
-    if (history.length === 0) {
-      const { ids, mask } = encodePrompt(lang === "en" ? "<|en|>\n" : "<|he|>\n");
-      guess = await chooseOpener({ ids, mask, lang });
-    } else {
-      guess = await guessWithModel({ history, lang, difficulty });
-    }
+      let guess;
+      if (history.length === 0) {
+        const { ids, mask } = encodePrompt(lang === "en" ? "<|en|>\n" : "<|he|>\n");
+        guess = await chooseOpener({ ids, mask, lang });
+      } else {
+        guess = await guessWithModel({ history, lang, difficulty });
+      }
 
-    // Hard sanitize to block non-ASCII (e.g., "autorité") for EN, and ensure length=5
-    const safe = sanitizeFinal(guess, lang) || fallbackWord(lang);
-    res.json({ guess: safe, mode: ORT_BACKEND });
+      // Hard sanitize (blocks things like "autorité" for EN)
+      const safe = sanitizeFinal(guess, lang) || fallbackWord(lang);
+      return { guess: safe, mode: ORT_BACKEND };
+    });
+
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: "ai_error", detail: String(e.message || e) });
   }
