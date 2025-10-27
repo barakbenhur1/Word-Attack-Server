@@ -6,9 +6,9 @@ const https = require("https");
 const path = require("path");
 
 // Prefer native ORT; fall back to WASM
-let ort, ORT_BACKEND = "node";
-try { ort = require("onnxruntime-node"); ORT_BACKEND = "node"; }
-catch { ort = require("onnxruntime-web"); ORT_BACKEND = "wasm"; }
+let ort, ORT_BACKEND = "wasm";
+try { ort = require("onnxruntime-web"); ORT_BACKEND = "wasm"; }
+catch { ort = require("onnxruntime-node"); ORT_BACKEND = "node"; }
 
 // ---------------- Env / paths ----------------
 const MODEL_DIR = process.env.MODEL_DIR || "/tmp/models";
