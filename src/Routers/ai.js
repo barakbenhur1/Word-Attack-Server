@@ -5,10 +5,15 @@ const fs = require("fs");
 const https = require("https");
 const path = require("path");
 
-// Prefer native ORT; fall back to WASM
+// Prefer WASM when ORT_FORCE_WASM=1 (keeps memory small on 512MB plans)
 let ort, ORT_BACKEND = "wasm";
-try { ort = require("onnxruntime-web"); ORT_BACKEND = "wasm"; }
-catch { ort = require("onnxruntime-node"); ORT_BACKEND = "node"; }
+const FORCE_WASM = String(process.env.ORT_FORCE_WASM || "") === "1";
+if (!FORCE_WASM) {
+  try { ort = require("onnxruntime-node"); ORT_BACKEND = "node"; }
+  catch { ort = require("onnxruntime-web"); ORT_BACKEND = "wasm"; }
+} else {
+  ort = require("onnxruntime-web");
+}
 
 // ---------------- Env / paths ----------------
 const MODEL_DIR = process.env.MODEL_DIR || "/tmp/models";
@@ -21,7 +26,7 @@ const MODEL_URL_TOKENIZER = process.env.MODEL_URL_TOKENIZER;
 const MODEL_LOAD_MODE = (process.env.MODEL_LOAD_MODE || "auto").toLowerCase(); // "memory" | "auto"
 const MAX_TOKENS = Number(process.env.MAX_TOKENS || 84);
 
-// Concurrency gate
+// Concurrency gate (protects memory on small plans)
 const AI_MAX_CONCURRENCY = parseInt(process.env.AI_MAX_CONCURRENCY || "1", 10);
 let _running = 0;
 const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -582,7 +587,7 @@ const aiReady = (async () => {
 
   // session
   if (ORT_BACKEND === "node" && local.storage === "disk") {
-    // ✅ memory-mapped file load
+    // memory-mapped file load
     session = await ort.InferenceSession.create(local.modelPath, sessionOptsNode);
     console.log("[AI] onnxruntime-node path OK");
   } else if (ORT_BACKEND === "node" && local.storage === "memory") {
@@ -627,8 +632,12 @@ async function respondHealth(res) {
     wordsHE: wordTokenIdsHE.length,
   });
 }
-router.get("/health", (_req, res) => withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) })));
-router.get("/aiHealth", (_req, res) => withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) })));
+router.get("/health", (_req, res) =>
+  withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) }))
+);
+router.get("/aiHealth", (_req, res) =>
+  withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) }))
+);
 
 // Unified guess handler with strict sanitization
 router.post("/aiGuess", async (req, res) => {
