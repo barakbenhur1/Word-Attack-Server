@@ -14,7 +14,10 @@ const fs = require("fs");
 console.log("[APNs] TEAM", !!process.env.APPLE_TEAM_ID);
 console.log("[APNs] KEY ", !!process.env.APPLE_KEY_ID);
 console.log("[APNs] PATH", process.env.APPLE_P8_PATH);
-console.log("[APNs] PATH exists:", !!process.env.APPLE_P8_PATH && fs.existsSync(process.env.APPLE_P8_PATH));
+console.log(
+  "[APNs] PATH exists:",
+  !!process.env.APPLE_P8_PATH && fs.existsSync(process.env.APPLE_P8_PATH)
+);
 console.log("[APNs] TOPIC", process.env.APP_BUNDLE_ID);
 console.log("[ENV] NODE_ENV =", process.env.NODE_ENV || "production");
 console.log("[ENV] loaded file =", envFile);
@@ -77,7 +80,8 @@ const corsOrigins = CORS_ORIGINS.split(",")
 
 const corsOptions = {
   origin(origin, cb) {
-    if (!origin || corsOrigins.includes("*") || corsOrigins.includes(origin)) return cb(null, true);
+    if (!origin || corsOrigins.includes("*") || corsOrigins.includes(origin))
+      return cb(null, true);
     return cb(new Error("Not allowed by CORS"));
   },
   credentials: true,
@@ -98,7 +102,9 @@ const generalLimiter = rateLimit({
 app.use(generalLimiter);
 
 const aiLimiter = rateLimit({
-  windowMs: Number(process.env.RL_AI_WINDOW_MS || process.env.RL_WINDOW_MS || 60_000),
+  windowMs: Number(
+    process.env.RL_AI_WINDOW_MS || process.env.RL_WINDOW_MS || 60_000
+  ),
   max: Number(process.env.RL_AI_MAX || 120),
   standardHeaders: true,
   legacyHeaders: false,
@@ -115,7 +121,9 @@ mongoose
   .connect(MONGO_URI, { dbName: "wordzap" })
   .then(() => console.log("db connected"))
   .catch((err) => console.error("db error:", err));
-mongoose.connection.on("connected", () => console.log("[mongo] db =", mongoose.connection.name));
+mongoose.connection.on("connected", () =>
+  console.log("[mongo] db =", mongoose.connection.name)
+);
 
 // ---------- Auth0 ----------
 const SESSION_SECRET = process.env.SESSION_SECRET || uuidv4();
@@ -185,8 +193,13 @@ try {
 }
 
 // ---------- Misc ----------
+app.get("/ai/_ping", (_req, res) => {
+  res.json({ ok: true, where: "app.js" });
+});
 app.get("/", (_req, res) => res.send("hello world 2"));
-app.get("/healthz", (_req, res) => res.json({ ok: true, ts: Date.now(), uptime: process.uptime() }));
+app.get("/healthz", (_req, res) =>
+  res.json({ ok: true, ts: Date.now(), uptime: process.uptime() })
+);
 
 // ---------- 404 + error handler (keep last) ----------
 app.use((req, res) => res.status(404).json({ error: "not_found" }));
