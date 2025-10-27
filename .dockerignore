@@ -6,3 +6,8 @@ npm-debug.log*
 .gitignore
 Keys/
 uploads/
+node_modules
+npm-debug.log*
+.git
+.env*
+Dockerfile
