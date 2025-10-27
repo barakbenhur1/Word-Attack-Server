@@ -11,3 +11,4 @@ npm-debug.log*
 .git
 .env*
 Dockerfile
+*.log
