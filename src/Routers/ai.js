@@ -26,7 +26,7 @@ const MODEL_URL_TOKENIZER = process.env.MODEL_URL_TOKENIZER;
 const MODEL_LOAD_MODE = (process.env.MODEL_LOAD_MODE || "auto").toLowerCase(); // "memory" | "auto"
 const MAX_TOKENS = Number(process.env.MAX_TOKENS || 64);
 
-// concurrency gate (avoid multiple ORT evals at once on 512 MB)
+// ---------- Concurrency gate ----------
 const AI_MAX_CONCURRENCY = parseInt(process.env.AI_MAX_CONCURRENCY || "1", 10);
 let _running = 0;
 const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -37,7 +37,7 @@ async function withGate(fn) {
   finally { _running--; }
 }
 
-// ---------- net helpers ----------
+// ---------- Net helpers ----------
 function httpsGetFollow(url, headers = {}, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -82,7 +82,7 @@ async function downloadToFile(url, outPath, headers = {}) {
   });
 }
 
-// ---------- model location / loading ----------
+// ---------- Model locator ----------
 async function ensureModelLocal() {
   const hdr = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
   const wantDisk = MODEL_LOAD_MODE !== "memory";
@@ -113,6 +113,7 @@ class TokenizerLite {
     this.id2tok = []; this.tok2id = new Map(); this.ranks = new Map();
     this.special = new Set(); this.bosId = null; this.eosId = null; this.unkId = 0;
     const model = cfg.model || {}; const added = cfg.added_tokens || []; const vocab = model.vocab;
+
     if (vocab && !Array.isArray(vocab) && typeof vocab === "object") {
       for (const [tok, id] of Object.entries(vocab)) { const i = Number(id); if (!Number.isFinite(i)) continue; this.id2tok[i] = tok; this.tok2id.set(tok, i); }
     } else if (Array.isArray(vocab)) {
@@ -121,6 +122,7 @@ class TokenizerLite {
     for (const a of added) if (a && typeof a.id === "number" && typeof a.content === "string") { this.id2tok[a.id] = a.content; this.tok2id.set(a.content, a.id); if (a.special) this.special.add(a.content); }
     this.special.add("<s>"); this.special.add("</s>"); this.special.add("<unk>");
     this.bosId = this.tok2id.get("<s>") ?? null; this.eosId = this.tok2id.get("</s>") ?? null; this.unkId = this.tok2id.get("<unk>") ?? 0;
+
     const merges = model.merges || [];
     for (let rank = 0; rank < merges.length; rank++) {
       const m = merges[rank]; let a, b;
@@ -145,13 +147,14 @@ class TokenizerLite {
   }
 }
 
-// ---------- inference + helpers (unchanged logic, trimmed) ----------
+// ---------- Inference helpers ----------
 const Difficulty = { easy:{temperature:0.7,topK:32}, medium:{temperature:0.4,topK:12}, hard:{temperature:0,topK:1}, boss:{temperature:0,topK:1} };
 const ALPHA_EN = new Set("abcdefghijklmnopqrstuvwxyz".split(""));
 const ALPHA_HE = new Set("אבגדהוזחטיכלמנסעפצקרשתךםןףץ".split(""));
+
 let session=null, tokenizer=null, vocabSize=0;
 let id2charEN=new Map(), id2charHE=new Map(), wordTokenIdsEN=[], wordTokenIdsHE=[];
-let STORAGE_KIND="memory";
+let STORAGE_KIND="unknown";
 
 const stripDiacritics = (s) => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 const onlyAlphaEN = (s) => [...s].every((c) => ALPHA_EN.has(c));
@@ -289,7 +292,7 @@ function buildMaps() {
   wordTokenIdsHE = Array.from(new Set(wordTokenIdsHE)).sort((a,b)=>a-b);
 }
 
-// ---------- LAZY INITIALIZER ----------
+// ---------- Lazy initializer ----------
 const sessionOptsNode = {
   graphOptimizationLevel: "basic",
   executionMode: "sequential",
@@ -298,10 +301,7 @@ const sessionOptsNode = {
   enableMemPattern: false,
   enableCpuMemArena: false,
 };
-const sessionOptsWasm = {
-  graphOptimizationLevel: "basic",
-  executionProviders: ["wasm"],
-};
+const sessionOptsWasm = { graphOptimizationLevel: "basic", executionProviders: ["wasm"] };
 
 let _initPromise = null;
 async function ensureSession() {
@@ -311,21 +311,26 @@ async function ensureSession() {
     STORAGE_KIND = local.storage;
 
     // tokenizer
-    let tokenizerJSON;
-    if (local.storage === "disk") tokenizerJSON = await fs.promises.readFile(local.tokenizerPath, "utf8");
-    else tokenizerJSON = local.tokenizerJSON;
+    const tokenizerJSON = local.storage === "disk"
+      ? await fs.promises.readFile(local.tokenizerPath, "utf8")
+      : local.tokenizerJSON;
     tokenizer = await TokenizerLite.fromJSON(tokenizerJSON);
 
     // session
     if (ORT_BACKEND === "node" && local.storage === "disk") {
-      session = await ort.InferenceSession.create(local.modelPath, sessionOptsNode);
+      session = await ort.InferenceSession.create(local.modelPath, sessionOptsNode); // memory-map
       console.log("[AI] onnxruntime-node path OK");
     } else if (ORT_BACKEND === "node" && local.storage === "memory") {
       session = await ort.InferenceSession.create(local.modelBytes, sessionOptsNode);
       console.log("[AI] onnxruntime-node bytes OK");
     } else {
-      if (ort.env && ort.env.wasm) { ort.env.wasm.numThreads = Number(process.env.ORT_WASM_THREADS || 1); ort.env.wasm.simd = true; }
-      const bytes = local.storage === "disk" ? await fs.promises.readFile(local.modelPath) : local.modelBytes;
+      if (ort.env && ort.env.wasm) {
+        ort.env.wasm.numThreads = Number(process.env.ORT_WASM_THREADS || 1);
+        ort.env.wasm.simd = true;
+      }
+      const bytes = local.storage === "disk"
+        ? await fs.promises.readFile(local.modelPath)
+        : local.modelBytes;
       session = await ort.InferenceSession.create(bytes, sessionOptsWasm);
       console.log("[AI] onnxruntime-web (WASM) OK");
     }
@@ -336,38 +341,61 @@ async function ensureSession() {
   return _initPromise;
 }
 
-// ---------- routes ----------
+// ---------- Routes ----------
+
+// Tiny ping (never loads model)
 router.get("/_ping", (_req, res) => {
   res.json({ ok: true, backend: ORT_BACKEND, warmed: !!session, storage: STORAGE_KIND });
 });
 
-async function respondHealth(res) {
-  await ensureSession();
-  res.json({
-    ok: true,
-    backend: ORT_BACKEND,
-    storage: STORAGE_KIND,
-    modelPath: STORAGE_KIND === "disk" ? MODEL_PATH : null,
-    tokenizerPath: STORAGE_KIND === "disk" ? TOKENIZER_PATH : null,
-    vocabSize,
-    lettersEN: id2charEN.size,
-    lettersHE: id2charHE.size,
-    wordsEN: wordTokenIdsEN.length,
-    wordsHE: wordTokenIdsHE.length,
-  });
-}
+// LITE health by default (no model init). Pass ?full=1 to load & show detailed stats.
+router.get("/health", async (req, res) => {
+  try {
+    const full = req.query.full === "1";
+    if (!full) {
+      const mu = process.memoryUsage();
+      return res.json({
+        ok: true,
+        warmed: !!session,
+        backend: ORT_BACKEND,
+        storage: STORAGE_KIND,
+        modelLoadMode: MODEL_LOAD_MODE,
+        modelOnDisk: fs.existsSync(MODEL_PATH),
+        tokenizerOnDisk: fs.existsSync(TOKENIZER_PATH),
+        memoryMB: {
+          rss: Math.round(mu.rss / 1024 / 1024),
+          heapUsed: Math.round(mu.heapUsed / 1024 / 1024),
+          heapTotal: Math.round(mu.heapTotal / 1024 / 1024),
+          external: Math.round(mu.external / 1024 / 1024),
+        },
+      });
+    }
+    // FULL (expensive): will initialize the model
+    await withGate(async () => { await ensureSession(); });
+    res.json({
+      ok: true,
+      warmed: !!session,
+      backend: ORT_BACKEND,
+      storage: STORAGE_KIND,
+      modelPath: STORAGE_KIND === "disk" ? MODEL_PATH : null,
+      tokenizerPath: STORAGE_KIND === "disk" ? TOKENIZER_PATH : null,
+      vocabSize,
+      lettersEN: id2charEN.size,
+      lettersHE: id2charHE.size,
+      wordsEN: wordTokenIdsEN.length,
+      wordsHE: wordTokenIdsHE.length,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
 
-router.get("/health", (_req, res) =>
-  withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) }))
-);
-router.get("/aiHealth", (_req, res) =>
-  withGate(() => respondHealth(res)).catch(e => res.status(500).json({ ok:false, error:String(e.message||e) }))
-);
-
+// Guess endpoint (loads model on demand)
 router.post("/aiGuess", async (req, res) => {
   try {
     const result = await withGate(async () => {
       await ensureSession();
+
       const body = req.body || {};
       const history = Array.isArray(body.history) ? body.history : [];
       const lang = body.lang === "he" ? "he" : "en";
@@ -392,12 +420,14 @@ router.post("/aiGuess", async (req, res) => {
       const safe = sanitizeFinal(guess, lang) || fallbackWord(lang);
       return { guess: safe, mode: ORT_BACKEND };
     });
+
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: "ai_error", detail: String(e.message || e) });
   }
 });
 
+// Legacy alias
 router.post("/guess", (req, res) => { req.url = "/aiGuess"; router.handle(req, res); });
 
 module.exports = router;
