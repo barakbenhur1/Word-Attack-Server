@@ -561,6 +561,7 @@ router.post("/aiGuess", async (req, res) => {
       const lang = body.lang === "he" ? "he" : "en";
       const difficulty = ["easy","medium","hard","boss"].includes(body.difficulty) ? body.difficulty : "medium";
 
+      // already-solved fast path
       if (history.length) {
         const last = history[history.length - 1];
         const greens = normalizeFeedback(last.feedback || "", 5);
@@ -575,8 +576,15 @@ router.post("/aiGuess", async (req, res) => {
         const { ids, mask } = encodePrompt(lang === "en" ? "<|en|>\n" : "<|he|>\n");
         guess = await chooseOpener({ ids, mask, lang });
       } else {
-        guess = await guessWithModel({ history, lang, difficulty });
+        const gameKey = getGameKey(req, lang, body);
+        const rawCheat = (difficulty === "boss") ? resolveCheatAnswer(lang, body) : null;
+        const cheatAnswer = sanitizeCheat(rawCheat, lang); // null if invalid or missing
+        guess = await guessWithModel({
+          history, lang, difficulty,
+          cheatAnswer, turnIndex: history.length, gameKey
+        });
       }
+
       const safe = sanitizeFinal(guess, lang) || fallbackWord(lang);
       return { guess: safe, mode: ORT_BACKEND };
     });
