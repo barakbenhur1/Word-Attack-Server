@@ -5,10 +5,13 @@
   "type": "commonjs",
   "main": "app.js",
   "license": "MIT",
-  "engines": { "node": ">=20 <21" },
+  "engines": {
+    "node": ">=20 <21"
+  },
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
+    "start:dev": "NODE_ENV=development nodemon --watch src --ext js,json app.js",
     "health": "curl -fsS http://localhost:${PORT:-3000}/ai/health || true",
     "postinstall": "node -e \"console.log('postinstall complete')\""
   },
