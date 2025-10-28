@@ -17,6 +17,7 @@ console.log("[APNs] PATH exists:", !!process.env.APPLE_P8_PATH && fs.existsSync(
 console.log("[APNs] TOPIC", process.env.APP_BUNDLE_ID);
 console.log("[ENV] NODE_ENV =", process.env.NODE_ENV || "production");
 console.log("[ENV] loaded file =", envFile);
+
 const express = require("express");
 const { auth } = require("express-openid-connect");
 const https = require("https");
