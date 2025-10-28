@@ -1,38 +1,49 @@
+# syntax=docker/dockerfile:1
+
 # ---- build stage ----
-FROM node:20-slim AS builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl libgomp1 libstdc++6 libatomic1 \
- && rm -rf /var/lib/apt/lists/*
-
+FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 COPY package*.json ./
-
-# No lockfile in context -> npm install
-RUN npm install --omit=dev
-
-# Make sure native ORT resolves (optional but nice)
+# use lockfile when present
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+# verify native ORT resolves at build time (optional)
 RUN node -e "require('onnxruntime-node'); console.log('onnxruntime-node OK')"
 
-COPY . .
-
 # ---- runtime ----
-FROM node:20-slim AS runner
+FROM node:20-bookworm-slim AS runner
+WORKDIR /app
 
+# minimal deps for onnxruntime-node + health
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libgomp1 libstdc++6 libatomic1 \
+    ca-certificates curl tini libstdc++6 libgomp1 libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
-ENV PORT=3000
-WORKDIR /app
-COPY --from=builder /app ./
+# DO NOT hardcode PORT on Render; it injects $PORT. Your app should use process.env.PORT || 3000.
+# ENV PORT=3000   # (leave this out)
+
+# conservative defaults for Free plan
+ENV AI_MAX_CONCURRENCY=1 \
+    MAX_TOKENS=48 \
+    ORT_FORCE_WASM=0 \
+    NODE_OPTIONS="--max-old-space-size=420" \
+    MODEL_LOAD_MODE=auto \
+    MODEL_DIR=/models \
+    MODEL_NAME=wordzap.onnx \
+    TOKENIZER_NAME=tokenizer.json
+
+# optional persistent disk (if you enable one in Render)
+VOLUME ["/models"]
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# tiny init to reap zombies
+ENTRYPOINT ["/usr/bin/tini","--"]
+
+# healthcheck (Render also has its own, but this helps locally)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:${PORT}/api/health || exit 1
+
 EXPOSE 3000
-
-# Keep memory low
-ENV AI_MAX_CONCURRENCY=1
-ENV MAX_TOKENS=48
-ENV ORT_FORCE_WASM=0
-ENV NODE_OPTIONS=--max-old-space-size=420
-
-CMD ["node", "app.js"]
+CMD ["node","app.js"]

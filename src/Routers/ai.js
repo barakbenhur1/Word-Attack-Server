@@ -229,6 +229,116 @@ function openerBias(w,lang){ const s=String(w||"").toLowerCase(); if (s.length!=
   const vowels=[...s].filter(c=>"aeiouy".includes(c)).length; const vowelNudge=vowels>=2?0.7:(vowels===1?-0.4:-0.8); const entropyBoost=(distinct/5)*2.0; return entropyBoost + vowelNudge + (distinct-3)*0.3 + dupPenalty; }
 function emptyConstraints(len=5){ return { length:len, fixed:Array(len).fill(null), bannedAt:Array(len).fill(0).map(()=>new Set()), disallow:new Set(), minCount:new Map(), maxCount:new Map() }; }
 
+// ---------- Boss cheat helpers (presence + green positions) ----------
+
+// Per-game ephemeral memory (reset each new gameKey)
+const _bossPresence = new Map(); // gameKey -> Map<char, count>
+const _bossGreens   = new Map(); // gameKey -> Map<pos, char>
+
+function getGameKey(req, lang, body) {
+  return String(body?.gameKey || req.get("x-game") || `${req.ip}:${lang}`);
+}
+
+function resolveCheatAnswer(lang, body) {
+  // Body wins; else env fallback
+  const cand = (body && typeof body.cheatAnswer === "string") ? body.cheatAnswer : null;
+  if (cand) return cand;
+  const envKey = lang === "he" ? "BOSS_ANSWER_HE" : "BOSS_ANSWER_EN";
+  return process.env[envKey] || null;
+}
+
+function sanitizeCheat(answer, lang) {
+  if (!answer) return null;
+  const t = stripDiacritics(String(answer).toLowerCase());
+  if (lang === "en") return isAscii5(t) ? t : null;
+  if (lang === "he") return isHeb5(t) ? t : null;
+  return null;
+}
+
+/**
+ * Mutates C (constraints) in-place to add knowledge about letters/greens,
+ * similar to WordZapAI.updateBossMemoryForTurn(...)
+ */
+function updateBossMemoryForTurn({ gameKey, lang, solution, turnIndex, C }) {
+  if (!solution || solution.length !== 5) return;
+
+  // Reset memory on first turn for this game
+  if (turnIndex === 0) { _bossPresence.set(gameKey, new Map()); _bossGreens.set(gameKey, new Map()); }
+
+  const knownP = _bossPresence.get(gameKey) || new Map();
+  const knownG = _bossGreens.get(gameKey)   || new Map();
+
+  const sArr = [...solution];
+  const solCount = new Map();
+  for (const c of sArr) solCount.set(c, (solCount.get(c) || 0) + 1);
+
+  // Merge existing greens/max caps into constraints
+  for (const [pos, ch] of knownG.entries()) C.fixed[pos] = ch;
+  for (const [ch, lim] of solCount.entries()) C.maxCount.set(ch, Math.min(C.maxCount.get(ch) ?? lim, lim));
+
+  const greensFromHistory = new Map();
+  for (let i = 0; i < C.length; i++) { const ch = C.fixed[i]; if (ch) greensFromHistory.set(ch, (greensFromHistory.get(ch) || 0) + 1); }
+
+  const totalGreens = (ch) => (greensFromHistory.get(ch) || 0) + [...knownG.values()].filter(v => v === ch).length;
+  const assured     = (ch) => Math.max(C.minCount.get(ch) || 0, totalGreens(ch));
+  const residual    = (ch) => Math.max(0, (solCount.get(ch) || 0) - assured(ch));
+
+  function attemptPresence() {
+    const pool = [];
+    for (const [ch] of solCount.entries()) {
+      const res = residual(ch);
+      if (res > 0) {
+        const hinted = (C.minCount.get(ch) || 0) > totalGreens(ch) ? 2 : 1;
+        for (let k = 0; k < res * hinted; k++) pool.push(ch);
+      }
+    }
+    if (pool.length === 0) return null;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const cur  = (knownP.get(pick) || 0) + 1;
+    knownP.set(pick, cur);
+    C.minCount.set(pick, Math.max(C.minCount.get(pick) || 0, cur));
+    return pick;
+  }
+
+  function attemptPosition() {
+    const positions = [];
+    for (let i = 0; i < sArr.length; i++) {
+      if (C.fixed[i] != null) continue;
+      if (knownG.has(i)) continue;
+      const ch = sArr[i];
+      if (totalGreens(ch) < (solCount.get(ch) || 0)) positions.push(i);
+    }
+    if (!positions.length) return null;
+
+    // Prefer positions whose letter is hinted or already "present"
+    positions.sort((a, b) => {
+      const La = sArr[a], Lb = sArr[b];
+      const hintedA = ((C.minCount.get(La) || 0) > totalGreens(La)) ? 1 : 0;
+      const hintedB = ((C.minCount.get(Lb) || 0) > totalGreens(Lb)) ? 1 : 0;
+      const learnA  = (knownP.get(La) || 0) > 0 ? 1 : 0;
+      const learnB  = (knownP.get(Lb) || 0) > 0 ? 1 : 0;
+      return (hintedB * 2 + learnB) - (hintedA * 2 + learnA);
+    });
+
+    const pos = positions[0];
+    const ch  = sArr[pos];
+    knownG.set(pos, ch);
+    C.fixed[pos] = ch;
+    return pos;
+  }
+
+  const presenceRoll = Math.random() < 0.50;
+  const extraChance  = (turnIndex >= 2) ? 0.30 : 0.10;
+  const extraRoll    = Math.random() < extraChance;
+
+  if (presenceRoll) attemptPresence();
+  if (extraRoll) { if (Math.random() < 0.5) { if (attemptPosition() == null) attemptPresence(); }
+                   else { if (attemptPresence() == null) attemptPosition(); } }
+
+  _bossPresence.set(gameKey, knownP);
+  _bossGreens.set(gameKey,   knownG);
+}
+
 async function chooseOpener({ ids, mask, lang }) {
   const pool = lang==="en" ? wordTokenIdsEN.slice() : wordTokenIdsHE.slice();
   if (pool.length>0){
@@ -251,20 +361,70 @@ async function chooseOpener({ ids, mask, lang }) {
   }
   let word=out.join(""); if (!isGoodFirstOpener(word,lang)) word=fallbackWord(lang); return word;
 }
-async function guessWithModel({ history=[], lang="en", difficulty="medium" }) {
+
+async function guessWithModel({ history = [], lang = "en", difficulty = "medium", cheatAnswer = null, turnIndex = history.length, gameKey = null }) {
   const { temperature, topK } = Difficulty[difficulty];
-  const prompt=buildPrompt(history,lang); let { ids, mask }=encodePrompt(prompt);
-  const C=buildConstraints(history); const id2char=lang==="en"?id2charEN:id2charHE; const cleanPool=new Set([...id2char.keys()].filter((id)=>id>=0 && id<vocabSize));
-  let logits=await runLogits(ids,mask); const used=new Map(); const out=[];
-  for (let pos=0; pos<5; pos++){
-    const NEG=-1e30; const masked=logits.slice(); for (let i=0;i<masked.length;i++) if (!cleanPool.has(i)) masked[i]=NEG;
-    const remaining=5-pos; let deficit=0; const keep=new Set();
-    for (const [ch,need] of C.minCount.entries()){ const have=used.get(ch)||0; const gap=Math.max(0,need-have); deficit+=gap; if (gap>0) for (const [tid,tch] of id2char.entries()) if (tch===ch) keep.add(tid); }
-    if (deficit>0 && deficit>=remaining) for (let i=0;i<masked.length;i++) if(!keep.has(i)) masked[i]=NEG;
-    for (const [tid,ch] of id2char.entries()) if (!isAllowedAt(ch,pos,used,C)) masked[tid]=NEG;
-    let nextId=sampleRestricted({ logits:masked, candidates:[...cleanPool], temperature, topK });
-    let ch=id2char.get(nextId); if (!ch || !isAllowedAt(ch,pos,used,C)){ ch=pickFallbackChar(pos,used,C,lang); for (const [tid,tch] of id2char.entries()) if (tch===ch){ nextId=tid; break; } }
-    out.push(ch); used.set(ch,(used.get(ch)||0)+1); ids=ids.slice(1).concat([nextId]); mask=mask.slice(1).concat([1]); logits=await runLogits(ids,mask);
+  const prompt = buildPrompt(history, lang);
+  let { ids, mask } = encodePrompt(prompt);
+
+  // Build constraints from history
+  const C = buildConstraints(history);
+
+  // Inject Boss memory if cheat answer is provided
+  if (difficulty === "boss" && cheatAnswer) {
+    updateBossMemoryForTurn({
+      gameKey: gameKey || "default",
+      lang,
+      solution: cheatAnswer,
+      turnIndex,
+      C
+    });
+  }
+
+  const id2char = lang === "en" ? id2charEN : id2charHE;
+  const cleanPool = new Set([...id2char.keys()].filter((id) => id >= 0 && id < vocabSize));
+
+  let logits = await runLogits(ids, mask);
+  const used = new Map();
+  const out = [];
+
+  for (let pos = 0; pos < 5; pos++) {
+    const NEG = -1e30;
+    const masked = logits.slice();
+
+    // Keep only cleanPool
+    for (let i = 0; i < masked.length; i++) if (!cleanPool.has(i)) masked[i] = NEG;
+
+    // Force deficit if needed (minCount coverage)
+    const remaining = 5 - pos;
+    let deficit = 0;
+    const keep = new Set();
+    for (const [ch, need] of C.minCount.entries()) {
+      const have = used.get(ch) || 0;
+      const gap = Math.max(0, need - have);
+      deficit += gap;
+      if (gap > 0) for (const [tid, tch] of id2char.entries()) if (tch === ch) keep.add(tid);
+    }
+    if (deficit > 0 && deficit >= remaining) for (let i = 0; i < masked.length; i++) if (!keep.has(i)) masked[i] = NEG;
+
+    // Apply fixed / banned / max rules
+    for (const [tid, ch] of id2char.entries()) if (!isAllowedAt(ch, pos, used, C)) masked[tid] = NEG;
+
+    // Sample
+    let nextId = sampleRestricted({ logits: masked, candidates: [...cleanPool], temperature, topK });
+    let ch = id2char.get(nextId);
+
+    // Fallback if blocked
+    if (!ch || !isAllowedAt(ch, pos, used, C)) {
+      ch = pickFallbackChar(pos, used, C, lang);
+      for (const [tid, tch] of id2char.entries()) if (tch === ch) { nextId = tid; break; }
+    }
+
+    out.push(ch);
+    used.set(ch, (used.get(ch) || 0) + 1);
+    ids = ids.slice(1).concat([nextId]);
+    mask = mask.slice(1).concat([1]);
+    logits = await runLogits(ids, mask);
   }
   return out.join("");
 }
