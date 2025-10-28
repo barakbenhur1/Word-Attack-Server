@@ -1,0 +1,16 @@
+[APNs] TEAM true
+[APNs] KEY  true
+[APNs] PATH /etc/secrets/AuthKey_Q4VXJ68M86.p8
+[APNs] PATH exists: false
+[APNs] TOPIC com.barak.wordzap
+[ENV] NODE_ENV = production
+[ENV] loaded file = .env.production
+(/ai) routes mounted
+(/devices) routes mounted
+[APNs] Missing env configuration — silent pushes will fail until you set APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_P8_PATH / APP_BUNDLE_ID.
+APNs routes bound
+[APNs] Missing env configuration — set APPLE_TEAM_ID / APPLE_KEY_ID / APPLE_P8_PATH / APP_BUNDLE_ID
+listening on *:3000
+SSL Version: TLS 1.2
+[mongo] db = wordzap
+db connected
