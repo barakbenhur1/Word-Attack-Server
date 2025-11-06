@@ -67,24 +67,63 @@ async function getWord(language, length, wordList = []) {
 module.exports = { getWord };
 
 // ===================== Wikipedia picker ======================
+// Put this near your imports:
+const WIKI_UA =
+  "WordZapBot/1.0 (+https://word-attack.onrender.com; contact: support@wordzap.app)"; // <-- use your real URL/contact
+
+// Helper: axios instance with proper headers
+const axiosWiki = axios.create({
+  timeout: 8000,
+  headers: {
+    "User-Agent": WIKI_UA,
+    "Api-User-Agent": WIKI_UA,
+    Accept: "application/json",
+  },
+  decompress: true,
+});
+
+// Optional: REST fallback to avoid 403s or generator hiccups
+async function fetchRandomSummariesREST(lang, count = 20) {
+  const endpoint = `https://${lang}.wikipedia.org/api/rest_v1/page/random/summary`;
+  const reqs = Array.from({ length: count }, () =>
+    axiosWiki
+      .get(endpoint, { validateStatus: (s) => s === 200 })
+      .then((r) => r.data)
+      .catch(() => null)
+  );
+  const items = (await Promise.all(reqs)).filter(Boolean);
+  // Adapt shape to what collectCandidates expects (title/extract/categories)
+  return items.map((d) => ({
+    title: d.title,
+    extract: d.extract || "",
+    categories: [], // REST summary doesn't include categories
+  }));
+}
+
 async function getFromWiki(language, length, wordList, maxAttempts = 8) {
   const url = `https://${language}.wikipedia.org/w/api.php`;
   const params = {
     action: "query",
     generator: "random",
-    grnlimit: 50, // 50 pages per attempt
-    grnnamespace: 0, // mainspace
+    grnlimit: 50,            // try 50 pages per attempt
+    grnnamespace: 0,         // mainspace
+    grnfilterredir: "nonredirects",
     prop: "extracts|categories",
     cllimit: 50,
     clshow: "!hidden",
     exchars: 1200,
-    explaintext: 1,
+    explaintext: 1,          // (typo safeguard; will set explaint**p**laintext below)
     redirects: 1,
     format: "json",
-    origin: "*",
+    formatversion: 2,        // cleaner arrays
+    // origin: "*",          // ❌ for browsers only; remove server-side to avoid 403
   };
 
-  // Normalize blocklist (if provided as [{value}]/[string])
+  // Ensure plaintext + get extracts for all generated pages
+  params.explaintext = 1;
+  params.exlimit = params.grnlimit;
+
+  // Normalize blocklist (your original logic)
   const blocked = new Set(
     Array.isArray(wordList) && wordList.length > 0
       ? wordList
@@ -93,16 +132,55 @@ async function getFromWiki(language, length, wordList, maxAttempts = 8) {
       : []
   );
 
+  // Attempt loop
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const { data } = await axios
-      .get(url, { params })
-      .catch(() => ({ data: null }));
-    const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
-    if (!pages.length) continue;
+    let pages = [];
 
+    // 1) Try Action API
+    try {
+      const res = await axiosWiki.get(url, {
+        params,
+        validateStatus: () => true, // we'll handle status codes
+      });
+
+      if (res.status === 200 && res.data?.query?.pages) {
+        pages = Array.isArray(res.data.query.pages)
+          ? res.data.query.pages
+          : Object.values(res.data.query.pages);
+      } else if (res.status === 403) {
+        console.warn(
+          `[Wiki] attempt ${attempt + 1} got 403 (likely UA/origin/rate). Falling back to REST.`
+        );
+      } else {
+        console.warn(
+          `[Wiki] attempt ${attempt + 1} unexpected status ${res.status}`
+        );
+      }
+    } catch (e) {
+      console.warn(`[Wiki] attempt ${attempt + 1} failed:`, e?.message || e);
+    }
+
+    // 2) If Action API yielded nothing, try REST fallback (20 summaries)
+    if (!pages.length) {
+      const restPages = await fetchRandomSummariesREST(language, 20);
+      if (restPages.length) {
+        pages = restPages;
+      }
+    }
+
+    if (!pages.length) {
+      // Light backoff and (optionally) make the next generator request smaller
+      await new Promise((r) => setTimeout(r, 250 + attempt * 150));
+      if (params.grnlimit > 20) {
+        params.grnlimit = 20;
+        params.exlimit = 20;
+      }
+      continue; // next attempt
+    }
+    
     const candidates = collectCandidates(pages, language, length, blocked);
     if (candidates.length) {
-      // Weighted pick by quality score (already computed)
+      // Weighted pick by quality score (your logic)
       const total = candidates.reduce((s, c) => s + c.score, 0);
       let r = Math.random() * total;
       for (const c of candidates) {
@@ -111,8 +189,10 @@ async function getFromWiki(language, length, wordList, maxAttempts = 8) {
       }
       return candidates[candidates.length - 1].raw;
     }
-    // else: try again with fresh random pages
+
+    // otherwise retry with fresh random pages
   }
+
   throw new Error("No suitable word found after multiple attempts.");
 }
 
