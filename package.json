@@ -28,6 +28,7 @@
     "moment": "^2.30.1",
     "mongoose": "^8.18.0",
     "onnxruntime-web": "^1.19.0",
+    "socket.io": "^4.8.1",
     "uuid": "^11.1.0"
   },
   "optionalDependencies": {
