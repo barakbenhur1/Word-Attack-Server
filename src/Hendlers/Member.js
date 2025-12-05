@@ -4,124 +4,164 @@ const Profile = require("../Schemas/Profile/Profile");
 const Languages = require("../Schemas/Lanuage/Languages");
 const req = require("../Hendlers/Request");
 
+// ---- Helpers --------------------------------------------------------------
+
+function ensureArray(val) {
+  return Array.isArray(val) ? val : [];
+}
+
+// ---- Main APIs ------------------------------------------------------------
+
 async function get(diffKey, uniqe) {
   const dayKey = moment().format("DD/MM/YYYY");
-  const diffcultyKey = misc.cleanText(diffKey);
+  const difficultyKey = misc.cleanText(diffKey);
 
-  const profile = await Profile.findOne({ uniqe: uniqe });
-  const languageKey = profile.language;
-  let language = await Languages.findOne({ value: languageKey }, { days: 1 });
+  // Only fetch what we need from Profile
+  const profile = await Profile.findOne(
+    { uniqe },
+    { language: 1, uniqe: 1, name: 1 }
+  ).lean();
 
-  if (!misc.exsit(language)) {
-    language = await Languages({ value: languageKey });
-    language.save();
-    return get(diffcultyKey, uniqe);
+  if (!profile) {
+    // If you prefer, throw instead of returning null
+    return null;
   }
 
-  let days = language.days;
+  // Load language doc once (no recursion)
+  let language = await Languages.findOne(
+    { value: profile.language },
+    { days: 1, value: 1 }
+  );
 
-  if (days.length == 0) {
-    days.push({ value: dayKey, difficulties: [] });
-    language.save();
-    return get(diffcultyKey, uniqe);
+  if (!language) {
+    language = new Languages({
+      value: profile.language,
+      days: [],
+    });
   }
 
-  const day = days[days.length - 1];
-  if (day.value != dayKey) {
-    days.push({ value: dayKey });
-    language.save();
-    return get(diffcultyKey, uniqe);
+  // --- Ensure "today" day exists ------------------------------------------
+
+  language.days = ensureArray(language.days);
+
+  let day = language.days[language.days.length - 1];
+
+  if (!day || day.value !== dayKey) {
+    day = { value: dayKey, difficulties: [] };
+    language.days.push(day);
   }
 
-  let difficulties = day.difficulties;
+  day.difficulties = ensureArray(day.difficulties);
 
-  for (j = 0; j < difficulties.length; j++) {
-    const diffculty = difficulties[j];
+  // --- Ensure difficulty exists -------------------------------------------
 
-    if (diffculty.value == diffcultyKey) {
-      let members = diffculty.members;
+  let difficulty =
+    day.difficulties.find((d) => d.value === difficultyKey) || null;
 
-      for (k = 0; k < members.length; k++) {
-        const member = members[k];
-        if (member.uniqe == uniqe) {
-          let words = member.words;
+  if (!difficulty) {
+    difficulty = { value: difficultyKey, words: [], members: [] };
+    day.difficulties.push(difficulty);
+  }
 
-          if (diffculty.words.length == words.length) {
-            const length = diffculty.value.includes("Easy")
-              ? 4
-              : diffculty.value.includes("Medium")
-              ? 5
-              : 6;
+  difficulty.words = ensureArray(difficulty.words);
+  difficulty.members = ensureArray(difficulty.members);
 
-            const word = await req.getWord(profile.language, length, words);
-            diffculty.words.push(word);
-            language.save();
-            return get(diffcultyKey, uniqe);
-          }
+  // --- Ensure member exists -----------------------------------------------
 
-          if (words.length == 0 || words[words.length - 1].done) {
-            words.push({
-              value: diffculty.words[words.length],
-              guesswork: [],
-              done: false,
-            });
-            language.save();
-            return get(diffcultyKey, uniqe);
-          }
+  let member =
+    difficulty.members.find((m) => m.uniqe === uniqe) || null;
 
-          return [member, language];
-        }
-      }
+  if (!member) {
+    member = {
+      uniqe: profile.uniqe,
+      name: profile.name,
+      totalScore: 0,
+      words: [],
+    };
+    difficulty.members.push(member);
+  }
 
-      members.push({
-        uniqe: profile.uniqe,
-        name: profile.name,
-        totalScore: 0,
-        words: [],
+  member.words = ensureArray(member.words);
+
+  const words = member.words;
+  const difficultyWords = difficulty.words;
+
+  // --- If we've used all difficulty words for this member, generate a new one
+
+  if (difficultyWords.length === words.length) {
+    const length = difficulty.value.includes("Easy")
+      ? 4
+      : difficulty.value.includes("Medium")
+      ? 5
+      : 6;
+
+    // This is likely the slow part (external request),
+    // but we only call it *once* now, not via recursion.
+    const word = await req.getWord(profile.language, length, words);
+    difficultyWords.push(word);
+  }
+
+  // --- Ensure there's an active word for this member ----------------------
+
+  if (words.length === 0 || words[words.length - 1].done) {
+    const nextIndex = words.length;
+    const baseWord = difficultyWords[nextIndex];
+
+    if (baseWord) {
+      words.push({
+        value: baseWord,
+        guesswork: [],
+        done: false,
       });
-      language.save();
-      return get(diffcultyKey, uniqe);
     }
   }
 
-  difficulties.push({ value: diffcultyKey, words: [], members: [] });
-  language.save();
-  return get(diffcultyKey, uniqe);
+  // Only one save at the end
+  if (language.isModified && language.isModified()) {
+    await language.save();
+  } else if (language.isNew) {
+    await language.save();
+  }
+
+  return [member, language];
 }
 
 async function getPremium(uniqe) {
-  const profile = await Profile.findOne({ uniqe: uniqe });
-  const languageKey = profile.language;
+  const profile = await Profile.findOne(
+    { uniqe },
+    { language: 1, uniqe: 1, name: 1 }
+  ).lean();
+
+  if (!profile) {
+    return null;
+  }
+
   let language = await Languages.findOne(
-    { value: languageKey },
-    { premium: 1 }
+    { value: profile.language },
+    { premium: 1, value: 1 }
   );
 
-  if (!misc.exsit(language)) {
-    language = await Languages({ value: languageKey });
-    language.save();
-    return getPremium(uniqe);
+  if (!language) {
+    language = new Languages({
+      value: profile.language,
+      premium: [],
+    });
   }
 
-  if (language.premium.length == 0) {
-    language.premium.push({
+  language.premium = ensureArray(language.premium);
+
+  let member = language.premium.find((m) => m.uniqe === uniqe) || null;
+
+  if (!member) {
+    member = {
       uniqe: profile.uniqe,
       name: profile.name,
-    });
-
-    language.save();
-    return getPremium(uniqe);
+    };
+    language.premium.push(member);
+    await language.save();
   }
 
-  let premiumMembers = language.premium;
-  for (j = 0; j < premiumMembers.length; j++) {
-    const member = premiumMembers[j];
-    if (member.uniqe == uniqe) {
-      return [member, language];
-    }
-  }
-
-  return null;
+  return [member, language];
 }
 
 module.exports = { get, getPremium };
