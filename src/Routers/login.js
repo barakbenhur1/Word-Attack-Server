@@ -48,6 +48,10 @@ async function login(uniqe, email, name, gender, language, res) {
     profile.save();
   } else {
     let save = false;
+     if (profile.email.length == 0 || profile.email != email) {
+      profile.email = email;
+      save = true;
+    }
     if (profile.language != language) {
       profile.language = language;
       save = true;
