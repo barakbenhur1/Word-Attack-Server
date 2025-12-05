@@ -5,10 +5,11 @@ const result = require("../Hendlers/Result");
 
 router.post("/", function (req, res) {
   const uniqe = req.body.uniqe;
+  const email = req.body.email;
   const name = req.body.name;
   const gender = req.body.gender;
   const language = req.body.language;
-  login(uniqe, name, gender, language, res);
+  login(uniqe, email, name, gender, language, res);
 });
 
 router.post("/isLoggedin", function (req, res) {
@@ -33,12 +34,13 @@ async function isLoggedin(uniqe, res) {
   res.send(value);
 }
 
-async function login(uniqe, name, gender, language, res) {
+async function login(uniqe, email, name, gender, language, res) {
   let profile = await Profile.findOne({ uniqe: uniqe });
 
   if (!result.exsit(profile)) {
     profile = await Profile({
       uniqe: uniqe,
+      email: email,
       name: name,
       gender: gender,
       language: language,
