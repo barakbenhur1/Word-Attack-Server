@@ -48,7 +48,7 @@ async function login(uniqe, email, name, gender, language, res) {
     profile.save();
   } else {
     let save = false;
-    if (email.length > 0 && (profile.email.length == 0 || profile.email != email)) {
+    if (email.length > 0 && (profile.email == undefined || profile.email.length == 0 || profile.email != email)) {
       profile.email = email;
       save = true;
     }
