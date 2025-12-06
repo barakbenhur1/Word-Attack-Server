@@ -12,7 +12,7 @@ function ensureArray(val) {
 
 // ---- Main APIs ------------------------------------------------------------
 
-async function get(diffKey, uniqe) {
+async function get(diffKey, uniqe, modify = true) {
   const dayKey = moment().format("DD/MM/YYYY");
   const difficultyKey = misc.cleanText(diffKey);
 
@@ -68,8 +68,7 @@ async function get(diffKey, uniqe) {
 
   // --- Ensure member exists -----------------------------------------------
 
-  let member =
-    difficulty.members.find((m) => m.uniqe === uniqe) || null;
+  let member = difficulty.members.find((m) => m.uniqe === uniqe) || null;
 
   if (!member) {
     member = {
@@ -88,39 +87,41 @@ async function get(diffKey, uniqe) {
 
   // --- If we've used all difficulty words for this member, generate a new one
 
-  if (difficultyWords.length === words.length) {
-    const length = difficulty.value.includes("Easy")
-      ? 4
-      : difficulty.value.includes("Medium")
-      ? 5
-      : 6;
+  if (modify) {
+    if (difficultyWords.length === words.length) {
+      const length = difficulty.value.includes("Easy")
+        ? 4
+        : difficulty.value.includes("Medium")
+        ? 5
+        : 6;
 
-    // This is likely the slow part (external request),
-    // but we only call it *once* now, not via recursion.
-    const word = await req.getWord(profile.language, length, words);
-    difficultyWords.push(word);
-  }
-
-  // --- Ensure there's an active word for this member ----------------------
-
-  if (words.length === 0 || words[words.length - 1].done) {
-    const nextIndex = words.length;
-    const baseWord = difficultyWords[nextIndex];
-
-    if (baseWord) {
-      words.push({
-        value: baseWord,
-        guesswork: [],
-        done: false,
-      });
+      // This is likely the slow part (external request),
+      // but we only call it *once* now, not via recursion.
+      const word = await req.getWord(profile.language, length, words);
+      difficultyWords.push(word);
     }
-  }
 
-  // Only one save at the end
-  if (language.isModified && language.isModified()) {
-    await language.save();
-  } else if (language.isNew) {
-    await language.save();
+    // --- Ensure there's an active word for this member ----------------------
+
+    if (words.length === 0 || words[words.length - 1].done) {
+      const nextIndex = words.length;
+      const baseWord = difficultyWords[nextIndex];
+
+      if (baseWord) {
+        words.push({
+          value: baseWord,
+          guesswork: [],
+          done: false,
+        });
+      }
+    }
+
+    // Only one save at the end
+    if (language.isModified && language.isModified()) {
+      await language.save();
+    } else if (language.isNew) {
+      await language.save();
+    }
   }
 
   return [member, language];

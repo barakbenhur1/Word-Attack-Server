@@ -55,7 +55,7 @@ async function getWord(diffcultyKey, uniqe, res) {
 }
 
 async function addGuess(diffcultyKey, uniqe, guess, res) {
-  const member = await memberProvider.get(diffcultyKey, uniqe);
+  const member = await memberProvider.get(diffcultyKey, uniqe, false);
   const words = member[0].words;
   const word = words[words.length - 1];
   word.guesswork.push(guess);

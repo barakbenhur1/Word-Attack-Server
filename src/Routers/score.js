@@ -91,7 +91,7 @@ async function getPremiumScores(uniqe) {
 }
 
 async function score(diffcultyKey, uniqe, res) {
-  const member = await memberProvider.get(diffcultyKey, uniqe);
+  const member = await memberProvider.get(diffcultyKey, uniqe, false);
   const words = member[0].words;
   const word = words[words.length - 2];
   const points = (words.length - 1) % 5 == 0 ? 40 : 20;
@@ -101,7 +101,7 @@ async function score(diffcultyKey, uniqe, res) {
 }
 
 async function getScore(diffcultyKey, uniqe, res) {
-  let member = await memberProvider.get(diffcultyKey, uniqe);
+  let member = await memberProvider.get(diffcultyKey, uniqe, false);
   if (member != null) {
     res.send({ score: member[0].totalScore });
     return;
