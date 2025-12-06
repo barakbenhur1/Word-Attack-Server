@@ -100,28 +100,28 @@ async function get(diffKey, uniqe, modify = true) {
       const word = await req.getWord(profile.language, length, words);
       difficultyWords.push(word);
     }
+  }
 
-    // --- Ensure there's an active word for this member ----------------------
+  // --- Ensure there's an active word for this member ----------------------
 
-    if (words.length === 0 || words[words.length - 1].done) {
-      const nextIndex = words.length;
-      const baseWord = difficultyWords[nextIndex];
+  if (words.length === 0 || words[words.length - 1].done) {
+    const nextIndex = words.length;
+    const baseWord = difficultyWords[nextIndex];
 
-      if (baseWord) {
-        words.push({
-          value: baseWord,
-          guesswork: [],
-          done: false,
-        });
-      }
+    if (baseWord) {
+      words.push({
+        value: baseWord,
+        guesswork: [],
+        done: false,
+      });
     }
+  }
 
-    // Only one save at the end
-    if (language.isModified && language.isModified()) {
-      await language.save();
-    } else if (language.isNew) {
-      await language.save();
-    }
+  // Only one save at the end
+  if (language.isModified && language.isModified()) {
+    await language.save();
+  } else if (language.isNew) {
+    await language.save();
   }
 
   return [member, language];
