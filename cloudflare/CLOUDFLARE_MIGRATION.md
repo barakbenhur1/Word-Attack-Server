@@ -126,8 +126,21 @@ npx wrangler@latest d1 execute wordzap --remote --file cloudflare/generated-migr
 `generated-migration.sql` is ignored by Git and must never be committed because
 it contains production user data.
 
-After import, compare source and D1 counts before cutover for profiles, daily
-members, member words, premium scores, and device tokens.
+The generator also writes `cloudflare/migration-manifest.json` containing
+only expected row counts. It is ignored by Git together with the generated SQL.
+
+After import, reconcile every migrated table through the protected production
+endpoint:
+
+```bash
+WORDZAP_BASE_URL="https://YOUR-WORKER.workers.dev" \
+MIGRATION_ADMIN_TOKEN="$MIGRATION_ADMIN_TOKEN" \
+  npm --prefix cloudflare run verify:migration
+```
+
+This compares the manifest against D1 counts for profiles, daily members,
+difficulty words, member words, premium scores and device tokens. Cutover is
+blocked on any mismatch.
 
 The MongoDB Atlas ChatGPT connector currently cannot read this Atlas
 organization because AI-client access is disabled at organization level. This
