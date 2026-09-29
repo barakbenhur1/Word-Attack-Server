@@ -73,6 +73,18 @@ npx wrangler@latest d1 execute wordzap --remote --file schema.sql
 npx wrangler@latest deploy
 ```
 
+Before the push APIs are enabled, configure APNs secrets without committing
+them:
+
+```bash
+npx wrangler@latest secret put APPLE_TEAM_ID
+npx wrangler@latest secret put APPLE_KEY_ID
+npx wrangler@latest secret put APPLE_P8
+npx wrangler@latest secret put PUSH_API_KEY
+```
+
+`APPLE_P8` is the PEM contents of the APNs private key, not a filesystem path.
+
 After deployment:
 
 ```bash
@@ -88,6 +100,22 @@ Acceptance requires `ok: true`, `storage: d1`, and
 Production cutover must not happen with an empty D1 database. Existing MongoDB
 profiles, leaderboard history, premium scores, game state and device
 registrations need to be migrated or deliberately retired field-by-field.
+
+A migration generator is included. It reads the legacy MongoDB database and
+writes an idempotent SQL import file that matches `schema.sql`:
+
+```bash
+cd "$HOME/Downloads/Word-Attack-Server"
+npm --prefix cloudflare install
+MONGO_URI="$MONGO_URI" npm --prefix cloudflare run migrate:prepare
+npx wrangler@latest d1 execute wordzap --remote --file cloudflare/generated-migration.sql
+```
+
+`generated-migration.sql` is ignored by Git and must never be committed because
+it contains production user data.
+
+After import, compare source and D1 counts before cutover for profiles, daily
+members, member words, premium scores, and device tokens.
 
 The MongoDB Atlas ChatGPT connector currently cannot read this Atlas
 organization because AI-client access is disabled at organization level. This
