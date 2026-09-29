@@ -212,6 +212,12 @@ try {
   const turn2 = p2.waitFor("pvp:turn",x=>x.matchId===matchId);
   starter.socket.send("pvp:rowDone",{matchId,playerId:starter.id,row:0});
   const [t1,t2] = await Promise.all([turn1,turn2]);
+  console.log("[smoke] turn relay", JSON.stringify({
+    starter:starter.id,
+    expectedNext:starter.otherId,
+    p1:t1,
+    p2:t2
+  }));
   assert(t1.nextPlayerId === starter.otherId && t2.nextPlayerId === starter.otherId, "Turn relay did not advance to opponent");
 
   // Simulate a transient network loss after matchmaking. The Durable Object
