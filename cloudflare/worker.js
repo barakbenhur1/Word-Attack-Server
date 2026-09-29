@@ -449,6 +449,29 @@ function authorizedPushRequest(request, env) {
   return expected.length >= 16 && request.headers.get("X-API-Key") === expected;
 }
 
+function authorizedMigrationRequest(request, env) {
+  const expected = String(env.MIGRATION_ADMIN_TOKEN || "");
+  const auth = String(request.headers.get("authorization") || "");
+  return expected.length >= 24 && auth === "Bearer " + expected;
+}
+
+async function migrationCounts(db) {
+  const tables = [
+    "profiles",
+    "daily_members",
+    "difficulty_words",
+    "member_words",
+    "premium_scores",
+    "device_tokens"
+  ];
+  const out = {};
+  for (const table of tables) {
+    const row = await db.prepare("SELECT COUNT(*) AS c FROM " + table).first();
+    out[table] = Number(row?.c || 0);
+  }
+  return out;
+}
+
 async function api(request, env, ctx) {
   if (!env.DB) return json(503, {ok:false,error:"d1_not_configured"});
   const url = new URL(request.url);
@@ -465,6 +488,11 @@ async function api(request, env, ctx) {
   if (method === "GET" && path === "/ready") {
     try { await env.DB.prepare("SELECT 1 AS ok").first(); return json(200,{ok:true,storage:"ready"}); }
     catch { return json(503,{ok:false,storage:"unavailable"}); }
+  }
+
+  if (method === "GET" && path === "/internal/migration/counts") {
+    if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
+    return json(200,{ok:true,counts:await migrationCounts(env.DB)});
   }
   if (path === "/pvp/socket" && request.headers.get("Upgrade") === "websocket") {
     const id = env.PVP.idFromName("global");
