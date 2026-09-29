@@ -38,6 +38,57 @@ if (process.env.WORDZAP_VERIFY_AI !== "0") {
   assert(typeof ai.guess === "string" && /^[a-zA-Z]{5}$/.test(ai.guess), "AI guess is not a five-letter English word");
 }
 
+
+if (process.env.WORDZAP_VERIFY_STATE === "1") {
+  const uniqe = "smoke-state-" + Date.now().toString(36);
+  const post = (path, body) => getJson(path, {
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify(body)
+  });
+
+  await post("/login", {
+    uniqe,
+    email:"smoke@example.invalid",
+    name:"Smoke",
+    gender:"other",
+    language:"en"
+  });
+
+  const loggedIn = await post("/login/isLoggedin", {uniqe});
+  assert(loggedIn && typeof loggedIn === "object", "login/isLoggedin did not find smoke profile");
+
+  const gender = await post("/login/gender", {uniqe});
+  assert(gender.gender === "other", "login/gender did not preserve profile data");
+
+  const game = await post("/words/getWord", {uniqe,diffculty:"Easy"});
+  assert(game?.word?.value && /^[a-zA-Z]{4}$/.test(game.word.value), "words/getWord did not return a four-letter Easy word");
+  assert(Array.isArray(game.word.guesswork), "words/getWord guesswork is not an array");
+
+  await post("/words/addGuess", {
+    uniqe,
+    diffculty:"Easy",
+    guess:game.word.value
+  });
+
+  await post("/score/score", {uniqe,diffculty:"Easy"});
+  const score = await post("/score/getScore", {uniqe,diffculty:"Easy"});
+  assert(Number(score.score) > 0, "score/getScore was not incremented");
+
+  const board = await post("/score/scoreboard", {uniqe});
+  assert(Array.isArray(board) && board.length > 0, "score/scoreboard returned no day data");
+
+  const place = await post("/score/place", {uniqe});
+  assert(place.easy === 1, "score/place did not rank the only smoke player first");
+
+  await post("/score/premiumScore", {uniqe});
+  const premium = await post("/score/getPremiumScore", {uniqe});
+  assert(premium.value === 1 && premium.rank === 1, "premium score state mismatch");
+
+  const premiumAll = await post("/score/getAllPremiumScores", {uniqe});
+  assert(Array.isArray(premiumAll) && premiumAll.some(x => x.uniqe === uniqe && x.value === 1), "premium leaderboard missing smoke player");
+}
+
 const wsBase = new URL(base);
 wsBase.protocol = wsBase.protocol === "http:" ? "ws:" : "wss:";
 wsBase.pathname = "/pvp/socket";
