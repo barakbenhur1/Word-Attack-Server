@@ -22,3 +22,54 @@ jobs:
         run: npm --prefix cloudflare run check
       - name: Static contract check
         run: npm --prefix cloudflare run verify:static
+
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prepare local D1
+        run: |
+          cd cloudflare
+          rm -rf .wrangler
+          npx --yes wrangler@latest d1 execute wordzap-local \
+            --local \
+            --file schema.sql \
+            --yes \
+            --config wrangler.test.toml
+      - name: Run local Worker acceptance
+        run: |
+          set -euo pipefail
+          cd cloudflare
+          npx --yes wrangler@latest dev \
+            --local \
+            --config wrangler.test.toml \
+            --port 8787 > /tmp/wordzap-wrangler.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != "1" ]; then
+            cat /tmp/wordzap-wrangler.log
+            exit 1
+          fi
+
+          WORDZAP_BASE_URL="http://127.0.0.1:8787" \
+          WORDZAP_VERIFY_AI=0 \
+            node verify-production.mjs || {
+              cat /tmp/wordzap-wrangler.log
+              exit 1
+            }
