@@ -715,6 +715,8 @@ async function api(request, env, ctx) {
   return json(404,{error:"not_found"});
 }
 
+const MATCH_RECONNECT_GRACE_MS = 15_000;
+
 export class WordZapPvp {
   constructor(ctx, env) { this.ctx = ctx; this.env = env; }
   sockets() { return this.ctx.getWebSockets(); }
@@ -724,6 +726,7 @@ export class WordZapPvp {
     try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({event,data})); } catch {}
   }
   socket(peerId) {
+    if (!peerId) return null;
     for (const ws of this.sockets()) if (this.meta(ws).peerId === peerId) return ws;
     return null;
   }
@@ -731,33 +734,71 @@ export class WordZapPvp {
   async setQueue(queue) { await this.ctx.storage.put("queue", queue.slice(0,10000)); }
   async getMatch(id) { return id ? await this.ctx.storage.get("match:" + id) : null; }
   async setMatch(match) { await this.ctx.storage.put("match:" + match.matchId, match); }
-  async deleteMatch(id) { if (id) await this.ctx.storage.delete("match:" + id); }
+  async deleteMatch(id) {
+    if (!id) return;
+    await this.ctx.storage.delete("match:" + id);
+    if (this.env.DB) {
+      await this.env.DB.prepare("DELETE FROM pvp_words WHERE match_id=?")
+        .bind(id).run().catch(() => {});
+    }
+  }
 
-  async leave(ws, notify=true) {
+  async scheduleReconnectAlarm() {
+    const current = await this.ctx.storage.getAlarm();
+    const next = Date.now() + MATCH_RECONNECT_GRACE_MS;
+    if (!current || current > next) await this.ctx.storage.setAlarm(next);
+  }
+
+  async leave(ws, {notify=true, transient=false, reason="disconnect"}={}) {
     const meta = this.meta(ws);
     let queue = await this.queue();
     queue = queue.filter(x => x.peerId !== meta.peerId && x.playerId !== meta.playerId);
     await this.setQueue(queue);
+
     if (meta.matchId) {
       const match = await this.getMatch(meta.matchId);
       if (match) {
-        const other = match.players.find(x => x.peerId !== meta.peerId);
-        if (notify && other) {
-          const otherWs = this.socket(other.peerId);
-          if (otherWs) this.send(otherWs,"pvp:opponentLeft",{matchId:meta.matchId,playerId:meta.playerId,reason:"disconnect"});
-        }
-        await this.deleteMatch(meta.matchId);
-        if (this.env.DB) {
-          await this.env.DB.prepare("DELETE FROM pvp_words WHERE match_id=?")
-            .bind(meta.matchId).run().catch(() => {});
-        }
-        for (const player of match.players) {
-          const pws = this.socket(player.peerId);
-          if (pws) { const pm = this.meta(pws); pm.matchId = null; this.save(pws,pm); }
+        const player = match.players.find(x =>
+          x.playerId === meta.playerId || x.peerId === meta.peerId
+        );
+        const other = match.players.find(x => x.playerId !== player?.playerId);
+
+        if (transient && player) {
+          player.peerId = null;
+          player.disconnectedAt = Date.now();
+          await this.setMatch(match);
+          await this.scheduleReconnectAlarm();
+          if (other?.peerId) {
+            const otherWs = this.socket(other.peerId);
+            if (otherWs) this.send(otherWs,"pvp:peerReconnecting",{
+              matchId:meta.matchId,
+              playerId:player.playerId,
+              graceMs:MATCH_RECONNECT_GRACE_MS
+            });
+          }
+        } else {
+          if (notify && other?.peerId) {
+            const otherWs = this.socket(other.peerId);
+            if (otherWs) this.send(otherWs,"pvp:opponentLeft",{
+              matchId:meta.matchId,
+              playerId:player?.playerId || meta.playerId,
+              reason
+            });
+          }
+          await this.deleteMatch(meta.matchId);
+          for (const item of match.players) {
+            const pws = this.socket(item.peerId);
+            if (pws) {
+              const pm = this.meta(pws);
+              pm.matchId = null;
+              this.save(pws,pm);
+            }
+          }
         }
       }
     }
-    meta.matchId = null;
+
+    if (!transient) meta.matchId = null;
     this.save(ws,meta);
   }
 
@@ -767,11 +808,16 @@ export class WordZapPvp {
     if (!playerId) return this.send(ws,"pvp:error",{message:"Missing playerId"});
 
     const meta = this.meta(ws);
-    meta.playerId = playerId; meta.lang = lang; this.save(ws,meta);
+    meta.playerId = playerId;
+    meta.lang = lang;
+    meta.matchId = null;
+    this.save(ws,meta);
 
     let queue = await this.queue();
     queue = queue.filter(x => x.peerId !== meta.peerId && x.playerId !== playerId);
-    const index = queue.findIndex(x => x.lang === lang && x.playerId !== playerId && this.socket(x.peerId));
+    const index = queue.findIndex(x =>
+      x.lang === lang && x.playerId !== playerId && this.socket(x.peerId)
+    );
 
     if (index < 0) {
       queue.push({peerId:meta.peerId,playerId,lang,joinedAt:Date.now()});
@@ -786,18 +832,85 @@ export class WordZapPvp {
 
     const matchId = crypto.randomUUID();
     const match = {
-      matchId,lang,
-      players:[{peerId:meta.peerId,playerId},{peerId:opponent.peerId,playerId:opponent.playerId}],
+      matchId,
+      lang,
+      players:[
+        {peerId:meta.peerId,playerId,disconnectedAt:null},
+        {peerId:opponent.peerId,playerId:opponent.playerId,disconnectedAt:null}
+      ],
       rows:{[playerId]:0,[opponent.playerId]:0},
-      coinflipResolved:false,starterPlayerId:null,currentTurnPlayerId:null,createdAt:Date.now()
+      coinflipResolved:false,
+      starterPlayerId:null,
+      currentTurnPlayerId:null,
+      createdAt:Date.now()
     };
     await this.setMatch(match);
 
-    meta.matchId = matchId; this.save(ws,meta);
-    const om = this.meta(otherWs); om.matchId = matchId; this.save(otherWs,om);
+    meta.matchId = matchId;
+    this.save(ws,meta);
+    const om = this.meta(otherWs);
+    om.matchId = matchId;
+    this.save(otherWs,om);
 
     this.send(ws,"pvp:matchFound",{matchId,you:playerId,opponentId:opponent.playerId,lang});
     this.send(otherWs,"pvp:matchFound",{matchId,you:opponent.playerId,opponentId:playerId,lang});
+  }
+
+  async rejoinMatch(ws, data) {
+    const matchId = String(data.matchId || "").trim();
+    const playerId = String(data.playerId || "").trim();
+    const match = await this.getMatch(matchId);
+    const player = match?.players?.find(x => x.playerId === playerId);
+
+    if (!match || !player) {
+      return this.send(ws,"pvp:error",{message:"Match not found for given matchId"});
+    }
+
+    const oldPeerId = player.peerId;
+    player.peerId = this.meta(ws).peerId;
+    player.disconnectedAt = null;
+    await this.setMatch(match);
+
+    const meta = this.meta(ws);
+    meta.playerId = playerId;
+    meta.matchId = match.matchId;
+    meta.lang = match.lang;
+    this.save(ws,meta);
+
+    if (oldPeerId && oldPeerId !== meta.peerId) {
+      const stale = this.socket(oldPeerId);
+      if (stale) {
+        const sm = this.meta(stale);
+        sm.matchId = null;
+        this.save(stale,sm);
+        try { stale.close(1000,"replaced by reconnect"); } catch {}
+      }
+    }
+
+    this.send(ws,"pvp:reconnected",{
+      matchId,
+      playerId,
+      currentTurnPlayerId:match.currentTurnPlayerId,
+      currentRow:Number(match.rows?.[playerId] || 0)
+    });
+
+    if (match.coinflipResolved && match.starterPlayerId) {
+      this.send(ws,"pvp:coinflipResult",{
+        matchId,
+        youStart:playerId === match.starterPlayerId,
+        tie:false,
+        replay:true
+      });
+    }
+
+    if (match.currentTurnPlayerId) {
+      this.send(ws,"pvp:turn",{
+        matchId,
+        nextPlayerId:match.currentTurnPlayerId,
+        nextRow:Number(match.rows?.[match.currentTurnPlayerId] || 0),
+        replay:true
+      });
+    }
   }
 
   async event(ws, msg) {
@@ -806,50 +919,70 @@ export class WordZapPvp {
 
     if (event === "pvp:queue:join" || event === "queue.join") return this.joinQueue(ws,data);
     if (event === "pvp:queue:leave" || event === "queue.leave") {
-      await this.leave(ws,true); return this.send(ws,"pvp:queue:left",{ok:true});
+      await this.leave(ws,{notify:true,transient:false,reason:"leave"});
+      return this.send(ws,"pvp:queue:left",{ok:true});
+    }
+
+    if (event === "pvp:join" || event === "join") {
+      return this.rejoinMatch(ws,data);
     }
 
     const meta = this.meta(ws);
-    if (event === "pvp:join" || event === "join") {
-      const match = await this.getMatch(String(data.matchId || ""));
-      if (!match || !match.players.some(x => x.playerId === String(data.playerId || ""))) {
-        return this.send(ws,"pvp:error",{message:"Match not found for given matchId"});
-      }
-      meta.playerId = String(data.playerId || meta.playerId || "");
-      meta.matchId = match.matchId; meta.lang = match.lang; this.save(ws,meta); return;
-    }
-
     const matchId = String(data.matchId || meta.matchId || "");
     const match = await this.getMatch(matchId);
     if (!match) return this.send(ws,"pvp:error",{message:"Match not found for given matchId"});
     const playerId = String(data.playerId || meta.playerId || "");
-    if (!match.players.some(x => x.playerId === playerId)) return this.send(ws,"pvp:error",{message:"Player not registered in this match"});
+    const player = match.players.find(x => x.playerId === playerId);
+    if (!player) return this.send(ws,"pvp:error",{message:"Player not registered in this match"});
+
+    if (player.peerId !== meta.peerId) {
+      return this.send(ws,"pvp:error",{message:"Player connection is stale"});
+    }
 
     if (event === "pvp:coinflip" || event === "coinflip") {
       if (!match.coinflipResolved) {
-        const starter = match.players[Math.floor(Math.random() * match.players.length)]?.playerId || playerId;
-        match.coinflipResolved = true; match.starterPlayerId = starter; match.currentTurnPlayerId = starter;
+        const connected = match.players.filter(x => x.peerId && !x.disconnectedAt);
+        const pool = connected.length ? connected : match.players;
+        const starter = pool[Math.floor(Math.random() * pool.length)]?.playerId || playerId;
+        match.coinflipResolved = true;
+        match.starterPlayerId = starter;
+        match.currentTurnPlayerId = starter;
         for (const p of match.players) match.rows[p.playerId] = 0;
         await this.setMatch(match);
       }
-      return this.send(ws,"pvp:coinflipResult",{matchId,youStart:playerId === match.starterPlayerId,tie:false});
+      return this.send(ws,"pvp:coinflipResult",{
+        matchId,
+        youStart:playerId === match.starterPlayerId,
+        tie:false
+      });
     }
 
     if (event === "pvp:typing" || event === "typing") {
       for (const p of match.players) {
         const pws = this.socket(p.peerId);
-        if (pws) this.send(pws,"pvp:typing",{matchId,playerId,row:Number(data.row || 0),guess:String(data.guess || "")});
+        if (pws) this.send(pws,"pvp:typing",{
+          matchId,
+          playerId,
+          row:Number(data.row || 0),
+          guess:String(data.guess || "")
+        });
       }
       return;
     }
 
     if (event === "pvp:rowDone" || event === "rowDone") {
-      if (match.currentTurnPlayerId && match.currentTurnPlayerId !== playerId) return this.send(ws,"pvp:error",{message:"Turn mismatch"});
+      if (match.currentTurnPlayerId && match.currentTurnPlayerId !== playerId) {
+        return this.send(ws,"pvp:error",{message:"Turn mismatch"});
+      }
       match.rows[playerId] = Number(match.rows[playerId] || 0) + 1;
       const other = match.players.find(x => x.playerId !== playerId);
       match.currentTurnPlayerId = other?.playerId || null;
       await this.setMatch(match);
-      const payload = {matchId,nextPlayerId:other?.playerId || null,nextRow:other ? Number(match.rows[other.playerId] || 0) : 0};
+      const payload = {
+        matchId,
+        nextPlayerId:other?.playerId || null,
+        nextRow:other ? Number(match.rows[other.playerId] || 0) : 0
+      };
       for (const p of match.players) {
         const pws = this.socket(p.peerId);
         if (pws) this.send(pws,"pvp:turn",payload);
@@ -858,7 +991,9 @@ export class WordZapPvp {
   }
 
   async fetch(request) {
-    if (request.headers.get("Upgrade") !== "websocket") return json(426,{ok:false,error:"websocket_required"});
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return json(426,{ok:false,error:"websocket_required"});
+    }
     const pair = new WebSocketPair();
     const [client,server] = Object.values(pair);
     const meta = {peerId:crypto.randomUUID(),playerId:"",lang:"en",matchId:null};
@@ -876,16 +1011,62 @@ export class WordZapPvp {
     let msg;
     try { msg = JSON.parse(message); }
     catch { return this.send(ws,"pvp:error",{message:"Invalid JSON"}); }
+
     try { await this.event(ws,msg); }
-    catch (error) { this.send(ws,"pvp:error",{message:String(error?.message || error)}); }
+    catch (error) {
+      this.send(ws,"pvp:error",{message:String(error?.message || error)});
+    }
   }
 
   async webSocketClose(ws) {
-    await this.leave(ws,true).catch(() => {});
+    await this.leave(ws,{notify:false,transient:true,reason:"disconnect"}).catch(() => {});
     try { ws.close(); } catch {}
   }
 
-  async webSocketError(ws) { await this.leave(ws,true).catch(() => {}); }
+  async webSocketError(ws) {
+    await this.leave(ws,{notify:false,transient:true,reason:"disconnect"}).catch(() => {});
+  }
+
+  async alarm() {
+    const now = Date.now();
+    const matches = await this.ctx.storage.list({prefix:"match:"});
+    let nextAlarm = null;
+
+    for (const [,match] of matches) {
+      const disconnected = (match.players || []).filter(x => Number(x.disconnectedAt || 0) > 0);
+      if (!disconnected.length) continue;
+
+      const expired = disconnected.find(x =>
+        now - Number(x.disconnectedAt || 0) >= MATCH_RECONNECT_GRACE_MS
+      );
+
+      if (!expired) {
+        for (const player of disconnected) {
+          const at = Number(player.disconnectedAt || 0) + MATCH_RECONNECT_GRACE_MS;
+          nextAlarm = nextAlarm === null ? at : Math.min(nextAlarm,at);
+        }
+        continue;
+      }
+
+      const opponent = (match.players || []).find(x => x.playerId !== expired.playerId);
+      if (opponent?.peerId) {
+        const otherWs = this.socket(opponent.peerId);
+        if (otherWs) {
+          this.send(otherWs,"pvp:opponentLeft",{
+            matchId:match.matchId,
+            playerId:expired.playerId,
+            reason:"reconnect_timeout"
+          });
+          const om = this.meta(otherWs);
+          om.matchId = null;
+          this.save(otherWs,om);
+        }
+      }
+      await this.deleteMatch(match.matchId);
+    }
+
+    if (nextAlarm !== null) await this.ctx.storage.setAlarm(nextAlarm);
+  }
 }
 
 export default {
