@@ -317,7 +317,129 @@ async function aiGuess(env, body) {
   throw new Error("ai_guess_unavailable");
 }
 
-async function api(request, env) {
+
+const textEncoder = new TextEncoder();
+let apnsKeyPromise = null;
+let apnsJwtCache = { token:"", expiresAt:0 };
+
+function base64url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+function pemBytes(pem) {
+  const body = String(pem || "")
+    .replace(/-----BEGIN PRIVATE KEY-----/g,"")
+    .replace(/-----END PRIVATE KEY-----/g,"")
+    .replace(/\s+/g,"");
+  if (!body) throw new Error("APPLE_P8 is missing");
+  const binary = atob(body);
+  return Uint8Array.from(binary, ch => ch.charCodeAt(0));
+}
+
+function apnsConfigured(env) {
+  return Boolean(env.APPLE_TEAM_ID && env.APPLE_KEY_ID && env.APPLE_P8 && env.APP_BUNDLE_ID);
+}
+
+async function apnsKey(env) {
+  if (!apnsKeyPromise) {
+    apnsKeyPromise = crypto.subtle.importKey(
+      "pkcs8",
+      pemBytes(env.APPLE_P8),
+      {name:"ECDSA",namedCurve:"P-256"},
+      false,
+      ["sign"]
+    );
+  }
+  return apnsKeyPromise;
+}
+
+async function apnsJwt(env) {
+  const now = Math.floor(Date.now() / 1000);
+  if (apnsJwtCache.token && apnsJwtCache.expiresAt > now + 300) return apnsJwtCache.token;
+
+  const header = base64url(textEncoder.encode(JSON.stringify({alg:"ES256",kid:String(env.APPLE_KEY_ID)})));
+  const payload = base64url(textEncoder.encode(JSON.stringify({iss:String(env.APPLE_TEAM_ID),iat:now})));
+  const unsigned = header + "." + payload;
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    {name:"ECDSA",hash:"SHA-256"},
+    await apnsKey(env),
+    textEncoder.encode(unsigned)
+  ));
+  const token = unsigned + "." + base64url(signature);
+  apnsJwtCache = {token,expiresAt:now + 50 * 60};
+  return token;
+}
+
+async function sendSilentPush(env, device, payload = {}) {
+  if (!apnsConfigured(env)) return {ok:false,status:503,reason:"apns_not_configured"};
+
+  const host = device.environment === "sandbox"
+    ? "api.sandbox.push.apple.com"
+    : "api.push.apple.com";
+  const topic = String(device.bundle_id || env.APP_BUNDLE_ID);
+  const response = await fetch("https://" + host + "/3/device/" + encodeURIComponent(device.token), {
+    method:"POST",
+    headers:{
+      "authorization":"bearer " + await apnsJwt(env),
+      "apns-topic":topic,
+      "apns-push-type":"background",
+      "apns-priority":"5",
+      "content-type":"application/json"
+    },
+    body:JSON.stringify({
+      aps:{"content-available":1},
+      type:payload.type || "wordzap.refresh",
+      args:payload.args || undefined
+    })
+  });
+
+  let detail = {};
+  try { detail = await response.json(); } catch {}
+  const reason = detail?.reason || null;
+  const ok = response.ok;
+
+  if (!ok && (reason === "BadDeviceToken" || reason === "Unregistered")) {
+    await env.DB.prepare("DELETE FROM device_tokens WHERE token=?").bind(device.token).run().catch(() => {});
+  }
+  return {ok,status:response.status,reason};
+}
+
+async function pushDevices(env, devices, payload) {
+  let sent = 0, failed = 0, cleaned = 0;
+  const results = [];
+  for (let i=0; i<devices.length; i+=20) {
+    const batch = devices.slice(i,i+20);
+    const rows = await Promise.all(batch.map(async device => {
+      try {
+        const result = await sendSilentPush(env,device,payload);
+        if (result.ok) sent += 1; else failed += 1;
+        if (result.reason === "BadDeviceToken" || result.reason === "Unregistered") cleaned += 1;
+        return {token:device.token,environment:device.environment,...result};
+      } catch (error) {
+        failed += 1;
+        return {token:device.token,environment:device.environment,ok:false,error:String(error?.message || error)};
+      }
+    }));
+    results.push(...rows);
+  }
+  return {total:devices.length,sent,failed,cleaned,results};
+}
+
+async function pushAllDevices(env, payload, filterEnvironment = null) {
+  const result = filterEnvironment
+    ? await env.DB.prepare("SELECT token,uniqe,environment,bundle_id FROM device_tokens WHERE environment=? ORDER BY updated_at DESC LIMIT 5000").bind(filterEnvironment).all()
+    : await env.DB.prepare("SELECT token,uniqe,environment,bundle_id FROM device_tokens ORDER BY updated_at DESC LIMIT 5000").all();
+  return pushDevices(env,result.results || [],payload);
+}
+
+function authorizedPushRequest(request, env) {
+  const expected = String(env.PUSH_API_KEY || "");
+  return expected.length >= 16 && request.headers.get("X-API-Key") === expected;
+}
+
+async function api(request, env, ctx) {
   if (!env.DB) return json(503, {ok:false,error:"d1_not_configured"});
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -364,7 +486,14 @@ async function api(request, env) {
     const body = await readJson(request);
     const p = await profileFor(env.DB, String(body.uniqe || ""));
     if (!p) return json(404,{error:"profile_not_found"});
-    return json(200,{value:await pickWord(p.language,5,[])});
+    const value = await pickWord(p.language,5,[]);
+    if (ctx && apnsConfigured(env)) {
+      ctx.waitUntil(pushAllDevices(env,{
+        type:"wordzap.refresh",
+        args:{reason:"leaderboard_update"}
+      }).catch(() => null));
+    }
+    return json(200,{value});
   }
 
   if (method === "POST" && path === "/words/getWord") {
@@ -500,6 +629,56 @@ async function api(request, env) {
     ).bind(token,uniqe,String(body.environment || "prod"),String(body.bundleId || env.APP_BUNDLE_ID || "com.barak.wordzap"),now,now).run();
     return json(200,{ok:true});
   }
+
+  if (method === "GET" && path === "/devices") {
+    if (!authorizedPushRequest(request,env)) return json(401,{error:"unauthorized"});
+    const uniqe = String(url.searchParams.get("uniqe") || "").trim();
+    const environment = String(url.searchParams.get("environment") || "").trim();
+    let query = "SELECT token,uniqe,environment,bundle_id,created_at,updated_at FROM device_tokens";
+    const filters = [], values = [];
+    if (uniqe) { filters.push("uniqe=?"); values.push(uniqe); }
+    if (environment) { filters.push("environment=?"); values.push(environment); }
+    if (filters.length) query += " WHERE " + filters.join(" AND ");
+    query += " ORDER BY updated_at DESC LIMIT 5000";
+    const stmt = env.DB.prepare(query);
+    const rows = values.length ? await stmt.bind(...values).all() : await stmt.all();
+    return json(200,rows.results || []);
+  }
+
+  if (method === "POST" && path === "/push/silent") {
+    if (!authorizedPushRequest(request,env)) return json(401,{error:"unauthorized"});
+    const body = await readJson(request,32*1024);
+    const token = String(body.token || "").trim();
+    const environment = body.environment === "sandbox" ? "sandbox" : "prod";
+    if (!token) return json(400,{error:"missing token"});
+    const result = await sendSilentPush(env,{
+      token,
+      environment,
+      bundle_id:String(body.bundleId || env.APP_BUNDLE_ID || "com.barak.wordzap")
+    },{type:body.type,args:body.args});
+    return json(200,{status:result.ok ? "sent" : "failed",apns:result});
+  }
+
+  if (method === "POST" && path === "/push/user") {
+    if (!authorizedPushRequest(request,env)) return json(401,{error:"unauthorized"});
+    const body = await readJson(request,32*1024);
+    const uniqe = String(body.uniqe || "").trim();
+    if (!uniqe) return json(400,{error:"missing uniqe"});
+    const rows = await env.DB.prepare(
+      "SELECT token,uniqe,environment,bundle_id FROM device_tokens WHERE uniqe=? ORDER BY updated_at DESC LIMIT 100"
+    ).bind(uniqe).all();
+    const result = await pushDevices(env,rows.results || [],{type:body.type,args:body.args});
+    return json(200,{status:"done",count:result.total,...result});
+  }
+
+  if (method === "POST" && path === "/push/broadcast") {
+    if (!authorizedPushRequest(request,env)) return json(401,{error:"unauthorized"});
+    const body = await readJson(request,32*1024);
+    const filterEnv = ["sandbox","prod"].includes(body.filterEnv) ? body.filterEnv : null;
+    const result = await pushAllDevices(env,{type:body.type,args:body.args},filterEnv);
+    return json(200,{status:"done",...result});
+  }
+
   if (method === "GET" && path === "/pvp/word") {
     const matchId = String(url.searchParams.get("matchId") || "").trim();
     const length = Number.parseInt(url.searchParams.get("length") || "0",10);
