@@ -1,0 +1,23 @@
+name = "wordzap-api-local-test"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[vars]
+APP_TIME_ZONE = "Asia/Jerusalem"
+APP_BUNDLE_ID = "com.barak.wordzap"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wordzap-local"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[durable_objects.bindings]]
+name = "PVP"
+class_name = "WordZapPvp"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WordZapPvp"]
