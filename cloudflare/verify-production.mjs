@@ -163,6 +163,7 @@ function socketHarness(name) {
 const id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 const p1 = socketHarness("p1");
 const p2 = socketHarness("p2");
+let p2Reconnect = null;
 
 try {
   await Promise.all([p1.waitOpen(),p2.waitOpen()]);
@@ -213,8 +214,36 @@ try {
   const [t1,t2] = await Promise.all([turn1,turn2]);
   assert(t1.nextPlayerId === starter.otherId && t2.nextPlayerId === starter.otherId, "Turn relay did not advance to opponent");
 
+  // Simulate a transient network loss after matchmaking. The Durable Object
+  // must preserve the match for its reconnect grace window and let a new
+  // WebSocket reclaim the same stable player identity.
+  const reconnectNotice = p1.waitFor(
+    "pvp:peerReconnecting",
+    x => x.matchId === matchId && x.playerId === p2Id
+  );
+  p2.ws.close(1001,"reconnect smoke");
+  const notice = await reconnectNotice;
+  assert(Number(notice.graceMs || 0) >= 10000, "Reconnect grace was not advertised");
+
+  p2Reconnect = socketHarness("p2-reconnect");
+  await p2Reconnect.waitOpen();
+  await p2Reconnect.waitFor("welcome");
+  p2Reconnect.send("pvp:join",{matchId,playerId:p2Id});
+  const reconnected = await p2Reconnect.waitFor(
+    "pvp:reconnected",
+    x => x.matchId === matchId && x.playerId === p2Id
+  );
+  assert(reconnected.matchId === matchId, "Reconnected peer did not reclaim its match");
+
+  p2Reconnect.send("pvp:typing",{matchId,playerId:p2Id,row:0,guess:"crane"});
+  const typingAfterReconnect = await p1.waitFor(
+    "pvp:typing",
+    x => x.matchId === matchId && x.playerId === p2Id
+  );
+  assert(typingAfterReconnect.guess === "crane", "PVP relay failed after reconnect");
+
   p1.send("pvp:queue:leave",{});
-  p2.send("pvp:queue:leave",{});
+  p2Reconnect.send("pvp:queue:leave",{});
   await new Promise(resolve=>setTimeout(resolve,250));
 
   console.log(JSON.stringify({
@@ -228,4 +257,5 @@ try {
 } finally {
   try { p1.ws.close(1000,"smoke complete"); } catch {}
   try { p2.ws.close(1000,"smoke complete"); } catch {}
+  try { p2Reconnect?.ws.close(1000,"smoke complete"); } catch {}
 }
