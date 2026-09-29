@@ -89,6 +89,18 @@ if (process.env.WORDZAP_VERIFY_STATE === "1") {
   assert(Array.isArray(premiumAll) && premiumAll.some(x => x.uniqe === uniqe && x.value === 1), "premium leaderboard missing smoke player");
 }
 
+
+if (process.env.WORDZAP_VERIFY_HEBREW === "1") {
+  const matchId = "smoke-he-" + Date.now().toString(36);
+  const word = await getJson(
+    "/pvp/word?matchId=" + encodeURIComponent(matchId) + "&length=5&lang=he"
+  );
+  assert(
+    typeof word.value === "string" && /^[\u05D0-\u05EA]{5}$/u.test(word.value),
+    "Hebrew PVP word is not exactly five Hebrew letters"
+  );
+}
+
 const wsBase = new URL(base);
 wsBase.protocol = wsBase.protocol === "http:" ? "ws:" : "wss:";
 wsBase.pathname = "/pvp/socket";
