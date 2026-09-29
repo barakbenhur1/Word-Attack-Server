@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wordzap-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "APP_TIME_ZONE": "UTC",
+    "APP_BUNDLE_ID": "com.barak.wordzap",
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.2-1b-instruct"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wordzap",
+      "database_id": "80d46269-7eda-46d8-861a-1d0e708b9d36"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PVP",
+        "class_name": "WordZapPvp"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WordZapPvp"]
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
+}
