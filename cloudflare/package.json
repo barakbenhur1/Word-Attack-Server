@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "check": "node --check worker.js",
-    "verify:static": "node verify-static.mjs"
+    "verify:static": "node verify-static.mjs",
+    "migrate:prepare": "node migrate-mongo-to-d1.mjs"
+  },
+  "dependencies": {
+    "mongodb": "^6.20.0"
   }
 }
