@@ -4,3 +4,5 @@ migration-manifest.json
 .dev.vars
 .wrangler/
 node_modules/
+deployment-manifest.json
+wrangler.generated.toml
