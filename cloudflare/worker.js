@@ -77,14 +77,23 @@ async function wikipediaCandidates(lang, length, blocked) {
       freq.set(n, (freq.get(n) || 0) + 1);
     }
     for (const raw of [...title, ...extract]) {
-      const word = normalizeWord(raw, lang);
-      if (!validWord(word, lang, length) || blocked.has(word)) continue;
-      if ((freq.get(word) || 0) === 0) continue;
+      const normalized = normalizeWord(raw, lang);
+      if (!validWord(normalized, lang, length) || blocked.has(normalized)) continue;
+      if ((freq.get(normalized) || 0) === 0) continue;
       if (lang === "en" && (/^[A-Z]{2,}$/.test(raw) || /^[A-Z][a-z]+$/.test(raw))) continue;
       if (lang === "he" && (/[\u05F3\u05F4\u05BE]/u.test(raw) || /[ךםןףץ](?=.)/u.test(raw))) continue;
-      const score = Math.min(5, 1 + (freq.get(word) || 0));
-      const old = out.get(word);
-      if (!old || old.score < score) out.set(word, {word, score});
+
+      // Preserve natural Hebrew final letters for the player-visible answer.
+      // Normalization is only for comparisons/deduplication, matching the
+      // legacy server's behavior.
+      const displayWord = lang === "he"
+        ? String(raw).replace(/[\u0591-\u05C7]/g, "")
+        : normalized;
+      if (!validWord(displayWord, lang, length)) continue;
+
+      const score = Math.min(5, 1 + (freq.get(normalized) || 0));
+      const old = out.get(normalized);
+      if (!old || old.score < score) out.set(normalized, {word:displayWord, score});
     }
   }
   return [...out.values()].sort((a,b) => b.score - a.score);
@@ -263,9 +272,10 @@ function wordleFeedback(guess, target) {
 }
 
 function historyAllows(candidate, history, lang) {
+  const target = normalizeWord(candidate, lang);
   return history.every(row => {
     const guess = normalizeWord(row.word, lang);
-    return validWord(guess, lang, 5) && wordleFeedback(guess, candidate) === String(row.feedback || "");
+    return validWord(guess, lang, 5) && wordleFeedback(guess, target) === String(row.feedback || "");
   });
 }
 
