@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check worker.js && node --check provision-and-deploy.mjs && node --check migrate-mongo-to-d1.mjs && node --check verify-static.mjs && node --check verify-production.mjs",
+    "check": "node --check worker.js && node --check provision-and-deploy.mjs && node --check migrate-mongo-to-d1.mjs && node --check verify-static.mjs && node --check verify-production.mjs && node --check verify-migration.mjs",
     "verify:static": "node verify-static.mjs",
     "migrate:prepare": "node migrate-mongo-to-d1.mjs",
     "provision:deploy": "node provision-and-deploy.mjs",
-    "verify:production": "node verify-production.mjs"
+    "verify:production": "node verify-production.mjs",
+    "verify:migration": "node verify-migration.mjs"
   },
   "dependencies": {
     "mongodb": "^6.20.0"
