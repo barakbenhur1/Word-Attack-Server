@@ -6,7 +6,7 @@ workers_dev = true
 preview_urls = false
 
 [vars]
-APP_TIME_ZONE = "Asia/Jerusalem"
+APP_TIME_ZONE = "UTC"
 APP_BUNDLE_ID = "com.barak.wordzap"
 WORKERS_AI_MODEL = "@cf/meta/llama-3.2-1b-instruct"
 
