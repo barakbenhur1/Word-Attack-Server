@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- cloudflare/package-lock.json && [ -f cloudflare/package-lock.json ]; then
+          if [ -f cloudflare/package-lock.json ] && [ -z "$(git status --porcelain -- cloudflare/package-lock.json)" ]; then
             echo "Lockfile already up to date."
             exit 0
           fi
