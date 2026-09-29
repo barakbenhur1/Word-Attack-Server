@@ -1,0 +1,109 @@
+name: Bootstrap WordZap Cloudflare
+
+on:
+  push:
+    paths:
+      - ".github/workflows/cloudflare-bootstrap.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: wordzap-cloudflare-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB_NAME: wordzap
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+      APPLE_P8: ${{ secrets.APPLE_P8 }}
+      PUSH_API_KEY: ${{ secrets.PUSH_API_KEY }}
+      MIGRATION_ADMIN_TOKEN: ${{ secrets.MIGRATION_ADMIN_TOKEN }}
+      KEEP_GENERATED_WRANGLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Cloudflare migration dependency
+        run: npm --prefix cloudflare install --no-audit --no-fund
+
+      - name: Validate Cloudflare credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "CLOUDFLARE_API_TOKEN is not configured for this repository."
+            exit 1
+          }
+
+      - name: Provision D1 and deploy parallel Worker
+        run: npm --prefix cloudflare run provision:deploy
+
+      - name: Sync any available production secrets
+        run: npm --prefix cloudflare run sync:secrets
+
+      - name: Resolve deployed URL
+        id: deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_URL="$(node -e 'const m=require("./cloudflare/deployment-manifest.json"); process.stdout.write(m.baseUrl || "")')"
+          test -n "$BASE_URL" || { echo "Could not resolve deployed Worker URL"; exit 1; }
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "WORDZAP_PARALLEL_WORKER=$BASE_URL"
+
+      - name: Import legacy MongoDB state when credentials are available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$MONGO_URI" ]; then
+            echo "MONGO_URI is not configured; leaving D1 as bootstrap-only state."
+            exit 0
+          fi
+
+          npm --prefix cloudflare run migrate:prepare
+          cd cloudflare
+          npx --yes wrangler@latest d1 execute wordzap             --remote             --file generated-migration.sql             --yes             --config wrangler.generated.toml
+
+      - name: Live parallel backend smoke
+        env:
+          WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
+          WORDZAP_VERIFY_AI: "0"
+          WORDZAP_VERIFY_STATE: "1"
+          WORDZAP_VERIFY_HEBREW: "1"
+        run: npm --prefix cloudflare run verify:production
+
+      - name: Reconcile imported data when migration credentials are available
+        env:
+          WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$MONGO_URI" ]; then
+            echo "No Mongo migration was run; skipping reconciliation."
+            exit 0
+          fi
+          test -n "$MIGRATION_ADMIN_TOKEN" || {
+            echo "MIGRATION_ADMIN_TOKEN missing; cannot reconcile migrated data."
+            exit 1
+          }
+          npm --prefix cloudflare run verify:migration
+
+      - name: Cleanup generated files
+        if: always()
+        shell: bash
+        run: |
+          rm -f cloudflare/wrangler.generated.toml
+          rm -f cloudflare/generated-migration.sql
+          rm -f cloudflare/migration-manifest.json
+          rm -f cloudflare/deployment-manifest.json
