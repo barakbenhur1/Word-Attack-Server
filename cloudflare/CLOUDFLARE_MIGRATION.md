@@ -95,6 +95,18 @@ curl -sS https://YOUR-WORKER.workers.dev/ready | python3 -m json.tool
 Acceptance requires `ok: true`, `storage: d1`, and
 `pvp: durable-object-websocket`.
 
+Run the live acceptance smoke after deployment:
+
+```bash
+WORDZAP_BASE_URL="https://YOUR-WORKER.workers.dev" \
+  npm --prefix cloudflare run verify:production
+```
+
+The smoke verifies health/readiness, one AI guess, two real WebSocket clients,
+matchmaking, shared PVP word consistency, coin flip, typing relay, turn relay,
+and clean match leave. Set `WORDZAP_VERIFY_AI=0` only when validating transport
+without consuming a Workers AI inference.
+
 ## Data migration gate
 
 Production cutover must not happen with an empty D1 database. Existing MongoDB
