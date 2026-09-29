@@ -10,6 +10,7 @@ if (!uri) throw new Error("MONGO_URI is required.");
 const databaseName = String(process.env.MONGO_DB_NAME || "wordzap");
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const outputPath = String(process.env.D1_MIGRATION_SQL || path.join(scriptDir, "generated-migration.sql"));
+const manifestPath = String(process.env.D1_MIGRATION_MANIFEST || path.join(scriptDir, "migration-manifest.json"));
 
 function sql(value) {
   if (value === null || value === undefined) return "NULL";
@@ -202,15 +203,26 @@ for (const device of devices) {
 out += "\nCOMMIT;\n";
 await fs.writeFile(outputPath, out, {mode:0o600});
 
+const manifest = {
+  version:1,
+  generatedAt:new Date().toISOString(),
+  sourceDatabase:databaseName,
+  counts:{
+    profiles:profileCount,
+    daily_members:dayMemberCount,
+    difficulty_words:difficultyWordCount,
+    member_words:memberWordCount,
+    premium_scores:premiumCount,
+    device_tokens:deviceCount
+  }
+};
+await fs.writeFile(manifestPath, JSON.stringify(manifest,null,2) + "\n", {mode:0o600});
+
 console.log(JSON.stringify({
   ok:true,
   outputPath,
-  profiles:profileCount,
-  dailyMembers:dayMemberCount,
-  difficultyWords:difficultyWordCount,
-  memberWords:memberWordCount,
-  premiumScores:premiumCount,
-  deviceTokens:deviceCount
+  manifestPath,
+  ...manifest.counts
 }, null, 2));
 
 await client.close();
