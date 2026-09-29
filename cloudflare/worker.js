@@ -737,6 +737,10 @@ export class WordZapPvp {
           if (otherWs) this.send(otherWs,"pvp:opponentLeft",{matchId:meta.matchId,playerId:meta.playerId,reason:"disconnect"});
         }
         await this.deleteMatch(meta.matchId);
+        if (this.env.DB) {
+          await this.env.DB.prepare("DELETE FROM pvp_words WHERE match_id=?")
+            .bind(meta.matchId).run().catch(() => {});
+        }
         for (const player of match.players) {
           const pws = this.socket(player.peerId);
           if (pws) { const pm = this.meta(pws); pm.matchId = null; this.save(pws,pm); }
