@@ -221,7 +221,7 @@ try {
     "pvp:peerReconnecting",
     x => x.matchId === matchId && x.playerId === p2Id
   );
-  p2.ws.close(1001,"reconnect smoke");
+  p2.ws.close(4001,"reconnect smoke");
   const notice = await reconnectNotice;
   assert(Number(notice.graceMs || 0) >= 10000, "Reconnect grace was not advertised");
 
