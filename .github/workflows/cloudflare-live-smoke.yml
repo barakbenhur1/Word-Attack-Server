@@ -1,0 +1,25 @@
+name: WordZap Cloudflare live smoke
+
+on:
+  push:
+    paths:
+      - ".github/workflows/cloudflare-live-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify deployed Cloudflare backend
+        env:
+          WORDZAP_BASE_URL: "https://wordzap-api.yamora-training-collector.workers.dev"
+          WORDZAP_VERIFY_AI: "1"
+          WORDZAP_VERIFY_STATE: "0"
+          WORDZAP_VERIFY_HEBREW: "1"
+        run: node cloudflare/verify-production.mjs
