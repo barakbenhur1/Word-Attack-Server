@@ -1,0 +1,5 @@
+wrangler.toml
+generated-migration.sql
+.dev.vars
+.wrangler/
+node_modules/
