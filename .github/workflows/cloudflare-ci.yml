@@ -74,6 +74,7 @@ jobs:
           WORDZAP_BASE_URL="http://127.0.0.1:8787" \
           WORDZAP_VERIFY_AI=0 \
           WORDZAP_VERIFY_STATE=1 \
+          WORDZAP_VERIFY_HEBREW=1 \
             node verify-production.mjs || {
               cat /tmp/wordzap-wrangler.log
               exit 1
