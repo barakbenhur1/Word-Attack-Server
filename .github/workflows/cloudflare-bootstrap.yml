@@ -37,22 +37,28 @@ jobs:
       - name: Install Cloudflare migration dependency
         run: npm --prefix cloudflare install --no-audit --no-fund
 
-      - name: Validate Cloudflare credential
+      - name: Detect Cloudflare credential
+        id: cloudflare
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || {
-            echo "CLOUDFLARE_API_TOKEN is not configured for this repository."
-            exit 1
-          }
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "CLOUDFLARE_API_TOKEN is not configured; bootstrap is prepared but deployment is skipped."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Provision D1 and deploy parallel Worker
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         run: npm --prefix cloudflare run provision:deploy
 
       - name: Sync any available production secrets
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         run: npm --prefix cloudflare run sync:secrets
 
       - name: Resolve deployed URL
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         id: deployment
         shell: bash
         run: |
@@ -63,6 +69,7 @@ jobs:
           echo "WORDZAP_PARALLEL_WORKER=$BASE_URL"
 
       - name: Import legacy MongoDB state when credentials are available
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +83,7 @@ jobs:
           npx --yes wrangler@latest d1 execute wordzap             --remote             --file generated-migration.sql             --yes             --config wrangler.generated.toml
 
       - name: Live parallel backend smoke
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         env:
           WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
           WORDZAP_VERIFY_AI: "0"
@@ -84,6 +92,7 @@ jobs:
         run: npm --prefix cloudflare run verify:production
 
       - name: Reconcile imported data when migration credentials are available
+        if: ${{ steps.cloudflare.outputs.configured == 'true' }}
         env:
           WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
         shell: bash
