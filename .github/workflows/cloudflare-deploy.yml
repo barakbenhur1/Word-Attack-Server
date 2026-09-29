@@ -8,6 +8,9 @@ on:
         required: false
         default: false
         type: boolean
+  push:
+    paths:
+      - "cloudflare/DEPLOY_REQUEST"
 
 jobs:
   deploy:
