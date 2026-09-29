@@ -8,12 +8,13 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const templatePath = path.join(root, "wrangler.toml.example");
 const generatedPath = path.join(root, "wrangler.generated.toml");
 const schemaPath = path.join(root, "schema.sql");
+const deploymentManifestPath = path.join(root, "deployment-manifest.json");
 
 if (!process.env.CLOUDFLARE_API_TOKEN) {
   throw new Error("CLOUDFLARE_API_TOKEN is required.");
 }
 
-function run(args, {capture=false} = {}) {
+function run(args, {capture=false, tee=false} = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("npx", ["--yes", "wrangler@latest", ...args], {
       cwd: root,
@@ -23,8 +24,16 @@ function run(args, {capture=false} = {}) {
 
     let stdout = "", stderr = "";
     if (capture) {
-      child.stdout.on("data", chunk => { stdout += String(chunk); });
-      child.stderr.on("data", chunk => { stderr += String(chunk); });
+      child.stdout.on("data", chunk => {
+        const value = String(chunk);
+        stdout += value;
+        if (tee) process.stdout.write(value);
+      });
+      child.stderr.on("data", chunk => {
+        const value = String(chunk);
+        stderr += value;
+        if (tee) process.stderr.write(value);
+      });
     }
 
     child.on("error", reject);
@@ -71,16 +80,34 @@ try {
     "--config",generatedPath
   ]);
 
+  let baseUrl = null;
   if (process.env.CLOUDFLARE_DEPLOY_DRY_RUN === "1") {
     await run(["deploy","--dry-run","--config",generatedPath]);
     console.log("[cloudflare] dry-run complete; no Worker deployed.");
   } else {
-    await run(["deploy","--config",generatedPath]);
+    const deployed = await run(["deploy","--config",generatedPath], {capture:true,tee:true});
+    const deploymentText = deployed.stdout + "\n" + deployed.stderr;
+    const match = deploymentText.match(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev\/?/);
+    baseUrl = match ? match[0].replace(/\/$/,"") : null;
     console.log("[cloudflare] Worker deployment completed.");
+    if (baseUrl) console.log("[cloudflare] Worker URL:", baseUrl);
   }
 
   const {stdout} = await run(["d1","info","wordzap","--json"], {capture:true});
   console.log("[cloudflare] D1 info:", stdout.trim());
+
+  await fs.writeFile(deploymentManifestPath, JSON.stringify({
+    version:1,
+    workerName:"wordzap-api",
+    databaseName:"wordzap",
+    databaseId:id,
+    baseUrl,
+    deployed:process.env.CLOUDFLARE_DEPLOY_DRY_RUN !== "1",
+    generatedAt:new Date().toISOString()
+  }, null, 2) + "\n", {mode:0o600});
+  console.log("[cloudflare] Deployment manifest:", deploymentManifestPath);
 } finally {
-  await fs.rm(generatedPath, {force:true});
+  if (process.env.KEEP_GENERATED_WRANGLER !== "1") {
+    await fs.rm(generatedPath, {force:true});
+  }
 }
