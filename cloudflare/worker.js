@@ -366,6 +366,129 @@ async function api(request, env) {
     if (!p) return json(404,{error:"profile_not_found"});
     return json(200,{value:await pickWord(p.language,5,[])});
   }
+
+  if (method === "POST" && path === "/words/getWord") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) return json(404,{error:"profile_not_found"});
+    const difficulty = difficultyKey(body.diffculty);
+    const game = await gameWord(env.DB,profile,difficulty,env.APP_TIME_ZONE || DEFAULT_TZ);
+    if (!game.row) return json(500,{error:"word_unavailable"});
+    return json(200,{
+      isTimeAttack:game.count % 5 === 0,
+      number:Math.max(0,game.count - 1),
+      word:{value:game.row.value,guesswork:safeArray(game.row.guesswork_json)}
+    });
+  }
+
+  if (method === "POST" && path === "/words/addGuess") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) return json(404,{error:"profile_not_found"});
+    const difficulty = difficultyKey(body.diffculty);
+    const day = dayKey(env.APP_TIME_ZONE || DEFAULT_TZ);
+    const row = await env.DB.prepare(
+      "SELECT word_index,value,guesswork_json FROM member_words WHERE day_key=? AND language=? AND difficulty=? AND uniqe=? ORDER BY word_index DESC LIMIT 1"
+    ).bind(day,profile.language,difficulty,profile.uniqe).first();
+    if (!row) return json(404,{error:"word_not_found"});
+    const guess = normalizeWord(body.guess,profile.language);
+    const guesses = safeArray(row.guesswork_json);
+    guesses.push(guess);
+    const done = guesses.length >= 5 || guess === normalizeWord(row.value,profile.language);
+    await env.DB.prepare(
+      "UPDATE member_words SET guesswork_json=?,done=?,updated_at=? WHERE day_key=? AND language=? AND difficulty=? AND uniqe=? AND word_index=?"
+    ).bind(JSON.stringify(guesses),done ? 1 : 0,Date.now(),day,profile.language,difficulty,profile.uniqe,row.word_index).run();
+    return json(200,{});
+  }
+
+  if (method === "POST" && path === "/score/getScore") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) return json(200,{score:0});
+    const row = await env.DB.prepare(
+      "SELECT total_score FROM daily_members WHERE day_key=? AND language=? AND difficulty=? AND uniqe=?"
+    ).bind(dayKey(env.APP_TIME_ZONE || DEFAULT_TZ),profile.language,difficultyKey(body.diffculty),profile.uniqe).first();
+    return json(200,{score:Number(row?.total_score || 0)});
+  }
+
+  if (method === "POST" && path === "/score/score") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) return json(404,{error:"profile_not_found"});
+    const difficulty = difficultyKey(body.diffculty);
+    const day = dayKey(env.APP_TIME_ZONE || DEFAULT_TZ);
+    await ensureMember(env.DB,profile,difficulty,day);
+    const row = await env.DB.prepare(
+      "SELECT word_index,guesswork_json FROM member_words WHERE day_key=? AND language=? AND difficulty=? AND uniqe=? ORDER BY word_index DESC LIMIT 1"
+    ).bind(day,profile.language,difficulty,profile.uniqe).first();
+    if (!row) return json(404,{error:"word_not_found"});
+    const guesses = safeArray(row.guesswork_json);
+    const points = ((Number(row.word_index) + 1) % 5 === 0) ? 40 : 20;
+    const delta = Math.max(0,5 * points - Math.max(0,guesses.length - 1) * points);
+    await env.DB.prepare(
+      "UPDATE daily_members SET total_score=total_score+?,updated_at=? WHERE day_key=? AND language=? AND difficulty=? AND uniqe=?"
+    ).bind(delta,Date.now(),day,profile.language,difficulty,profile.uniqe).run();
+    return json(200,{});
+  }
+
+  if (method === "POST" && path === "/score/scoreboard") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    return json(200,profile ? await scoreboardFor(env.DB,profile.language) : []);
+  }
+
+  if (method === "POST" && path === "/score/place") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    const out = {easy:null,medium:null,hard:null};
+    if (!profile) return json(200,out);
+    const rows = await env.DB.prepare(
+      "SELECT difficulty,uniqe,total_score,created_at FROM daily_members WHERE day_key=? AND language=? ORDER BY difficulty ASC,total_score DESC,created_at ASC"
+    ).bind(dayKey(env.APP_TIME_ZONE || DEFAULT_TZ),profile.language).all();
+    const groups = new Map();
+    for (const row of rows.results || []) {
+      if (!groups.has(row.difficulty)) groups.set(row.difficulty,[]);
+      groups.get(row.difficulty).push(row);
+    }
+    for (const [difficulty,members] of groups) {
+      const index = members.findIndex(x => String(x.uniqe).toLowerCase() === profile.uniqe.toLowerCase());
+      const key = difficultySlug(difficulty);
+      if (index >= 0 && Object.prototype.hasOwnProperty.call(out,key)) out[key] = index + 1;
+    }
+    return json(200,out);
+  }
+
+  if (method === "POST" && path === "/score/premiumScore") {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) return json(404,{ok:false,error:"Member not found"});
+    const now = Date.now();
+    await env.DB.prepare(
+      "INSERT INTO premium_scores(language,uniqe,name,premium_score,created_at,updated_at) VALUES(?,?,?,1,?,?) " +
+      "ON CONFLICT(language,uniqe) DO UPDATE SET name=excluded.name,premium_score=premium_score+1,updated_at=excluded.updated_at"
+    ).bind(profile.language,profile.uniqe,profile.name || "",now,now).run();
+    return json(200,{ok:true});
+  }
+
+  if (method === "POST" && (path === "/score/getPremiumScore" || path === "/score/getAllPremiumScores")) {
+    const body = await readJson(request);
+    const profile = await profileFor(env.DB,String(body.uniqe || ""));
+    if (!profile) {
+      if (path.endsWith("getAllPremiumScores")) return json(200,[]);
+      return json(200,{name:"unknowen",uniqe:String(body.uniqe || ""),value:0,rank:Number.MAX_SAFE_INTEGER});
+    }
+    const rows = await env.DB.prepare(
+      "SELECT name,uniqe,premium_score,updated_at FROM premium_scores WHERE language=? ORDER BY premium_score DESC,updated_at ASC"
+    ).bind(profile.language).all();
+    const mapped = (rows.results || []).map((x,i) => ({
+      name:x.name || "",uniqe:x.uniqe,value:Number(x.premium_score || 0),rank:i + 1
+    }));
+    if (path.endsWith("getAllPremiumScores")) return json(200,mapped);
+    return json(200,mapped.find(x => x.uniqe === profile.uniqe) || {
+      name:profile.name || "unknowen",uniqe:profile.uniqe,value:0,rank:Number.MAX_SAFE_INTEGER
+    });
+  }
+
   if (method === "POST" && path === "/devices/register") {
     const body = await readJson(request, 32 * 1024);
     const uniqe = String(body.uniqe || "").trim(), token = String(body.token || "").trim();
