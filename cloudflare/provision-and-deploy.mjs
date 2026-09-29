@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-const root = path.resolve(process.cwd(), "cloudflare");
+const root = path.dirname(fileURLToPath(import.meta.url));
 const templatePath = path.join(root, "wrangler.toml.example");
 const generatedPath = path.join(root, "wrangler.generated.toml");
 const schemaPath = path.join(root, "schema.sql");
