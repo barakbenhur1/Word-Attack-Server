@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - ".github/workflows/cloudflare-live-smoke.yml"
+      - "cloudflare/verify-production.mjs"
+      - "cloudflare/worker.js"
+      - "cloudflare/wrangler.jsonc"
   workflow_dispatch:
 
 jobs:
