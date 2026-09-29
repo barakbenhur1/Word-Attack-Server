@@ -1,0 +1,9 @@
+{
+  "name": "wordzap-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check worker.js",
+    "verify:static": "node verify-static.mjs"
+  }
+}
