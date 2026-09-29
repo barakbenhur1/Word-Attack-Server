@@ -5,10 +5,12 @@ on:
     paths:
       - "cloudflare/**"
       - ".github/workflows/cloudflare-ci.yml"
+      - ".github/workflows/cloudflare-deploy.yml"
   pull_request:
     paths:
       - "cloudflare/**"
       - ".github/workflows/cloudflare-ci.yml"
+      - ".github/workflows/cloudflare-deploy.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
