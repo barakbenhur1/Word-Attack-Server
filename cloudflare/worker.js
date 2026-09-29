@@ -1,4 +1,4 @@
-const DEFAULT_TZ = "Asia/Jerusalem";
+const DEFAULT_TZ = "UTC";
 const HEB_FINALS = { "ך":"כ", "ם":"מ", "ן":"נ", "ף":"פ", "ץ":"צ" };
 
 function headers() {
