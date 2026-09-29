@@ -1,12 +1,15 @@
 import fs from "node:fs/promises";
 import process from "node:process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { MongoClient } from "mongodb";
 
 const uri = String(process.env.MONGO_URI || "").trim();
 if (!uri) throw new Error("MONGO_URI is required.");
 
 const databaseName = String(process.env.MONGO_DB_NAME || "wordzap");
-const outputPath = String(process.env.D1_MIGRATION_SQL || "cloudflare/generated-migration.sql");
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const outputPath = String(process.env.D1_MIGRATION_SQL || path.join(scriptDir, "generated-migration.sql"));
 
 function sql(value) {
   if (value === null || value === undefined) return "NULL";
