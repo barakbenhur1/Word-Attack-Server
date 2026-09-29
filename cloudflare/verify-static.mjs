@@ -7,6 +7,7 @@ const requiredWorkerFragments = [
   'export class WordZapPvp',
   '"/healthz"',
   '"/ready"',
+  '"/internal/migration/counts"',
   '"/login"',
   '"/words/word"',
   '"/words/getWord"',
