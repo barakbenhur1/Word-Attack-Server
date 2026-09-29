@@ -895,7 +895,12 @@ export class WordZapPvp {
     }
 
     const oldPeerId = player.peerId;
-    player.peerId = this.meta(ws).peerId;
+    const newPeerId = this.meta(ws).peerId;
+    const isReconnect = Boolean(player.disconnectedAt) || (
+      oldPeerId && oldPeerId !== newPeerId
+    );
+
+    player.peerId = newPeerId;
     player.disconnectedAt = null;
     await this.setMatch(match);
 
@@ -915,29 +920,34 @@ export class WordZapPvp {
       }
     }
 
-    this.send(ws,"pvp:reconnected",{
-      matchId,
-      playerId,
-      currentTurnPlayerId:match.currentTurnPlayerId,
-      currentRow:Number(match.rows?.[playerId] || 0)
-    });
-
-    if (match.coinflipResolved && match.starterPlayerId) {
-      this.send(ws,"pvp:coinflipResult",{
+    // Match-found is followed by a normal pvp:join from both peers. Do not
+    // misclassify that first room join as a reconnect or replay stale turn
+    // state. Replay only when a disconnected/replaced peer really returns.
+    if (isReconnect) {
+      this.send(ws,"pvp:reconnected",{
         matchId,
-        youStart:playerId === match.starterPlayerId,
-        tie:false,
-        replay:true
+        playerId,
+        currentTurnPlayerId:match.currentTurnPlayerId,
+        currentRow:Number(match.rows?.[playerId] || 0)
       });
-    }
 
-    if (match.currentTurnPlayerId) {
-      this.send(ws,"pvp:turn",{
-        matchId,
-        nextPlayerId:match.currentTurnPlayerId,
-        nextRow:Number(match.rows?.[match.currentTurnPlayerId] || 0),
-        replay:true
-      });
+      if (match.coinflipResolved && match.starterPlayerId) {
+        this.send(ws,"pvp:coinflipResult",{
+          matchId,
+          youStart:playerId === match.starterPlayerId,
+          tie:false,
+          replay:true
+        });
+      }
+
+      if (match.currentTurnPlayerId) {
+        this.send(ws,"pvp:turn",{
+          matchId,
+          nextPlayerId:match.currentTurnPlayerId,
+          nextRow:Number(match.rows?.[match.currentTurnPlayerId] || 0),
+          replay:true
+        });
+      }
     }
   }
 
