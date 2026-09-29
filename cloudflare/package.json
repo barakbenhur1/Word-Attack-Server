@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check worker.js",
+    "check": "node --check worker.js && node --check provision-and-deploy.mjs && node --check migrate-mongo-to-d1.mjs && node --check verify-static.mjs",
     "verify:static": "node verify-static.mjs",
     "migrate:prepare": "node migrate-mongo-to-d1.mjs",
     "provision:deploy": "node provision-and-deploy.mjs"
