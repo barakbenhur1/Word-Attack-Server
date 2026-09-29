@@ -4,10 +4,29 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Validate without deploying"
+        description: "Validate Cloudflare deployment without publishing"
         required: false
         default: false
         type: boolean
+      migrate_data:
+        description: "Migrate the legacy MongoDB production data into D1"
+        required: false
+        default: true
+        type: boolean
+      verify_ai:
+        description: "Exercise Workers AI during the live smoke"
+        required: false
+        default: true
+        type: boolean
+      require_push:
+        description: "Require APNs and push admin secrets before acceptance"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: wordzap-cloudflare-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -17,14 +36,94 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB_NAME: wordzap
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+      APPLE_P8: ${{ secrets.APPLE_P8 }}
+      PUSH_API_KEY: ${{ secrets.PUSH_API_KEY }}
+      MIGRATION_ADMIN_TOKEN: ${{ secrets.MIGRATION_ADMIN_TOKEN }}
       CLOUDFLARE_DEPLOY_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+      KEEP_GENERATED_WRANGLER: "1"
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Validate required Cloudflare credentials
+
+      - name: Install migration dependency
+        run: npm --prefix cloudflare install --no-audit --no-fund
+
+      - name: Validate production credentials
+        shell: bash
         run: |
+          set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+
+          if [ "${{ inputs.migrate_data }}" = "true" ]; then
+            test -n "$MONGO_URI" || { echo "Missing MONGO_URI required for production migration"; exit 1; }
+            test -n "$MIGRATION_ADMIN_TOKEN" || { echo "Missing MIGRATION_ADMIN_TOKEN required for reconciliation"; exit 1; }
+          fi
+
+          if [ "${{ inputs.require_push }}" = "true" ]; then
+            test -n "$APPLE_TEAM_ID" || { echo "Missing APPLE_TEAM_ID"; exit 1; }
+            test -n "$APPLE_KEY_ID" || { echo "Missing APPLE_KEY_ID"; exit 1; }
+            test -n "$APPLE_P8" || { echo "Missing APPLE_P8"; exit 1; }
+            test -n "$PUSH_API_KEY" || { echo "Missing PUSH_API_KEY"; exit 1; }
+          fi
+
       - name: Provision D1, apply schema and deploy Worker
         run: npm --prefix cloudflare run provision:deploy
+
+      - name: Sync Cloudflare secrets
+        if: ${{ !inputs.dry_run }}
+        run: npm --prefix cloudflare run sync:secrets
+
+      - name: Prepare MongoDB migration
+        if: ${{ inputs.migrate_data && !inputs.dry_run }}
+        run: npm --prefix cloudflare run migrate:prepare
+
+      - name: Import MongoDB state into D1
+        if: ${{ inputs.migrate_data && !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd cloudflare
+          npx --yes wrangler@latest d1 execute wordzap             --remote             --file generated-migration.sql             --yes             --config wrangler.generated.toml
+
+      - name: Resolve deployed Worker URL
+        if: ${{ !inputs.dry_run }}
+        id: deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_URL="$(node -e 'const m=require("./cloudflare/deployment-manifest.json"); process.stdout.write(m.baseUrl || "")')"
+          test -n "$BASE_URL" || { echo "Could not resolve deployed workers.dev URL"; exit 1; }
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "Worker deployed at $BASE_URL"
+
+      - name: Live production acceptance
+        if: ${{ !inputs.dry_run }}
+        env:
+          WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
+          WORDZAP_VERIFY_AI: ${{ inputs.verify_ai && '1' || '0' }}
+          WORDZAP_VERIFY_STATE: "1"
+          WORDZAP_VERIFY_HEBREW: "1"
+        run: npm --prefix cloudflare run verify:production
+
+      - name: Reconcile MongoDB and D1 row counts
+        if: ${{ inputs.migrate_data && !inputs.dry_run }}
+        env:
+          WORDZAP_BASE_URL: ${{ steps.deployment.outputs.base_url }}
+        run: npm --prefix cloudflare run verify:migration
+
+      - name: Remove generated production files
+        if: always()
+        shell: bash
+        run: |
+          rm -f cloudflare/wrangler.generated.toml
+          rm -f cloudflare/generated-migration.sql
+          rm -f cloudflare/migration-manifest.json
+          rm -f cloudflare/deployment-manifest.json
