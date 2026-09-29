@@ -121,6 +121,131 @@ async function login(db, body) {
   ).bind(uniqe,email,name,gender,language,now,now).run();
 }
 
+
+function cleanText(input) {
+  return String(input || "")
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function difficultyKey(input) { return cleanText(input); }
+function difficultySlug(input) { return difficultyKey(input).toLowerCase(); }
+function difficultyLength(input) {
+  const key = difficultySlug(input);
+  if (key.includes("easy")) return 4;
+  if (key.includes("medium")) return 5;
+  return 6;
+}
+
+function dayKey(timeZone = DEFAULT_TZ, date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone, day:"2-digit", month:"2-digit", year:"numeric"
+  }).formatToParts(date);
+  const get = type => parts.find(p => p.type === type)?.value || "";
+  return get("day") + "/" + get("month") + "/" + get("year");
+}
+
+function safeArray(value) {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+async function ensureMember(db, profile, difficulty, day) {
+  const now = Date.now();
+  await db.prepare(
+    "INSERT INTO daily_members(day_key,language,difficulty,uniqe,name,total_score,created_at,updated_at) VALUES(?,?,?,?,?,0,?,?) " +
+    "ON CONFLICT(day_key,language,difficulty,uniqe) DO UPDATE SET name=excluded.name,updated_at=excluded.updated_at"
+  ).bind(day,profile.language,difficulty,profile.uniqe,profile.name || "",now,now).run();
+}
+
+async function gameWord(db, profile, difficulty, timeZone) {
+  const day = dayKey(timeZone);
+  await ensureMember(db,profile,difficulty,day);
+
+  const memberRows = await db.prepare(
+    "SELECT word_index,value,guesswork_json,done FROM member_words WHERE day_key=? AND language=? AND difficulty=? AND uniqe=? ORDER BY word_index ASC"
+  ).bind(day,profile.language,difficulty,profile.uniqe).all();
+  const words = memberRows.results || [];
+  const last = words.length ? words[words.length - 1] : null;
+
+  if (!last || Number(last.done) === 1) {
+    const nextIndex = words.length;
+    let shared = await db.prepare(
+      "SELECT value FROM difficulty_words WHERE day_key=? AND language=? AND difficulty=? AND word_index=?"
+    ).bind(day,profile.language,difficulty,nextIndex).first();
+
+    if (!shared) {
+      const existing = await db.prepare(
+        "SELECT value FROM difficulty_words WHERE day_key=? AND language=? AND difficulty=? ORDER BY word_index ASC"
+      ).bind(day,profile.language,difficulty).all();
+      const blocked = (existing.results || []).map(x => x.value);
+      const value = await pickWord(profile.language,difficultyLength(difficulty),blocked);
+      await db.prepare(
+        "INSERT OR IGNORE INTO difficulty_words(day_key,language,difficulty,word_index,value,created_at) VALUES(?,?,?,?,?,?)"
+      ).bind(day,profile.language,difficulty,nextIndex,value,Date.now()).run();
+      shared = await db.prepare(
+        "SELECT value FROM difficulty_words WHERE day_key=? AND language=? AND difficulty=? AND word_index=?"
+      ).bind(day,profile.language,difficulty,nextIndex).first();
+    }
+
+    if (shared) {
+      const now = Date.now();
+      await db.prepare(
+        "INSERT OR IGNORE INTO member_words(day_key,language,difficulty,uniqe,word_index,value,guesswork_json,done,created_at,updated_at) VALUES(?,?,?,?,?,?,'[]',0,?,?)"
+      ).bind(day,profile.language,difficulty,profile.uniqe,nextIndex,shared.value,now,now).run();
+    }
+  }
+
+  const row = await db.prepare(
+    "SELECT word_index,value,guesswork_json,done FROM member_words WHERE day_key=? AND language=? AND difficulty=? AND uniqe=? ORDER BY word_index DESC LIMIT 1"
+  ).bind(day,profile.language,difficulty,profile.uniqe).first();
+  const count = await db.prepare(
+    "SELECT COUNT(*) AS c FROM member_words WHERE day_key=? AND language=? AND difficulty=? AND uniqe=?"
+  ).bind(day,profile.language,difficulty,profile.uniqe).first();
+
+  return {day,row,count:Number(count?.c || 0)};
+}
+
+async function scoreboardFor(db, language) {
+  const [membersResult, wordsResult, memberWordsResult] = await Promise.all([
+    db.prepare("SELECT day_key,difficulty,uniqe,name,total_score,created_at FROM daily_members WHERE language=? ORDER BY created_at ASC,total_score DESC").bind(language).all(),
+    db.prepare("SELECT day_key,difficulty,word_index,value,created_at FROM difficulty_words WHERE language=? ORDER BY created_at ASC,word_index ASC").bind(language).all(),
+    db.prepare("SELECT day_key,difficulty,uniqe,word_index,value,guesswork_json,done,created_at FROM member_words WHERE language=? ORDER BY created_at ASC,word_index ASC").bind(language).all()
+  ]);
+
+  const days = new Map();
+  const diff = (day,difficulty) => {
+    if (!days.has(day)) days.set(day,{value:day,difficulties:new Map()});
+    const map = days.get(day).difficulties;
+    if (!map.has(difficulty)) map.set(difficulty,{value:difficulty,words:[],members:new Map()});
+    return map.get(difficulty);
+  };
+
+  for (const row of wordsResult.results || []) diff(row.day_key,row.difficulty).words.push(row.value);
+  for (const row of membersResult.results || []) {
+    diff(row.day_key,row.difficulty).members.set(row.uniqe,{
+      uniqe:row.uniqe,name:row.name || "",totalScore:Number(row.total_score || 0),words:[]
+    });
+  }
+  for (const row of memberWordsResult.results || []) {
+    const d = diff(row.day_key,row.difficulty);
+    if (!d.members.has(row.uniqe)) d.members.set(row.uniqe,{uniqe:row.uniqe,name:"",totalScore:0,words:[]});
+    d.members.get(row.uniqe).words.push({
+      value:row.value,guesswork:safeArray(row.guesswork_json),done:Number(row.done) === 1
+    });
+  }
+
+  return [...days.values()].map(day => ({
+    value:day.value,
+    difficulties:[...day.difficulties.values()].map(d => ({
+      value:d.value,words:d.words,members:[...d.members.values()]
+    }))
+  })).slice(-30);
+}
+
 function wordleFeedback(guess, target) {
   const g = Array.from(guess), t = Array.from(target);
   const out = Array(g.length).fill("-");
