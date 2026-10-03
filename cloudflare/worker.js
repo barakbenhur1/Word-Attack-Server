@@ -674,11 +674,25 @@ async function api(request, env, ctx) {
   if (method === "GET" && path === "/push/health") {
     const required = ["APPLE_TEAM_ID","APPLE_KEY_ID","APPLE_P8","APP_BUNDLE_ID"];
     const missing = required.filter(key => !String(env[key] || "").trim());
+
+    let keyValid = false;
+    let jwtReady = false;
+    if (missing.length === 0) {
+      try {
+        await apnsKey(env);
+        keyValid = true;
+        const token = await apnsJwt(env);
+        jwtReady = typeof token === "string" && token.split(".").length === 3;
+      } catch {}
+    }
+
     return json(200,{
       ok:true,
-      configured:missing.length === 0,
+      configured:missing.length === 0 && keyValid && jwtReady,
       provider:"apns",
-      missing
+      missing,
+      keyValid,
+      jwtReady
     });
   }
 
