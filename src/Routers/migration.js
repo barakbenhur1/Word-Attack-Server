@@ -121,84 +121,126 @@ router.get("/source-counts", async (req,res) => {
   }
 });
 
+async function runMigration({allowNonEmpty=false} = {}) {
+  await mongoose.connection.asPromise();
+  const db = mongoose.connection.db;
+
+  const before = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
+  const beforeCounts = before?.counts || {};
+  const nonEmpty = Object.entries(beforeCounts).filter(([,value]) => Number(value || 0) !== 0);
+
+  if (nonEmpty.length && !allowNonEmpty) {
+    const error = new Error("target_not_empty");
+    error.code = "target_not_empty";
+    error.counts = beforeCounts;
+    throw error;
+  }
+
+  const expected = emptyExpected();
+
+  await migrateCollection(
+    db.collection("profileschemas"),
+    "profiles",
+    profile => {
+      if (String(profile?.uniqe || "").trim()) expected.profiles += 1;
+    },
+    50
+  );
+
+  await migrateCollection(
+    db.collection("languagesschemas"),
+    "languages",
+    language => countLanguageDocument(language,expected),
+    1
+  );
+
+  await migrateCollection(
+    db.collection("devices"),
+    "devices",
+    device => {
+      if (String(device?.token || "").trim() && String(device?.uniqe || "").trim()) {
+        expected.device_tokens += 1;
+      }
+    },
+    50
+  ).catch(async error => {
+    if (!/ns not found|namespace/i.test(String(error?.message || error))) throw error;
+  });
+
+  const after = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
+  const actual = after?.counts || {};
+  const mismatches = Object.keys(expected)
+    .filter(key => Number(actual[key] || 0) !== Number(expected[key] || 0))
+    .map(key => ({table:key,expected:expected[key],actual:Number(actual[key] || 0)}));
+
+  if (mismatches.length) {
+    const error = new Error("reconciliation_failed");
+    error.code = "reconciliation_failed";
+    error.expected = expected;
+    error.actual = actual;
+    error.mismatches = mismatches;
+    throw error;
+  }
+
+  return {
+    ok:true,
+    migrated:true,
+    target:targetBase(),
+    expected,
+    actual
+  };
+}
+
 router.post("/run", async (req,res) => {
   if (!authorized(req)) return res.status(401).json({error:"unauthorized"});
-
   try {
-    await mongoose.connection.asPromise();
-    const db = mongoose.connection.db;
-
-    const before = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
-    const beforeCounts = before?.counts || {};
-    const nonEmpty = Object.entries(beforeCounts).filter(([,value]) => Number(value || 0) !== 0);
-
-    if (nonEmpty.length && req.query.resume !== "1") {
+    res.json(await runMigration({allowNonEmpty:req.query.resume === "1"}));
+  } catch (error) {
+    if (error?.code === "target_not_empty") {
       return res.status(409).json({
         ok:false,
         error:"target_not_empty",
-        counts:beforeCounts,
+        counts:error.counts,
         hint:"Retry with ?resume=1 only after reviewing the existing D1 state."
       });
     }
-
-    const expected = emptyExpected();
-
-    await migrateCollection(
-      db.collection("profileschemas"),
-      "profiles",
-      profile => {
-        if (String(profile?.uniqe || "").trim()) expected.profiles += 1;
-      },
-      50
-    );
-
-    await migrateCollection(
-      db.collection("languagesschemas"),
-      "languages",
-      language => countLanguageDocument(language,expected),
-      1
-    );
-
-    await migrateCollection(
-      db.collection("devices"),
-      "devices",
-      device => {
-        if (String(device?.token || "").trim() && String(device?.uniqe || "").trim()) {
-          expected.device_tokens += 1;
-        }
-      },
-      50
-    ).catch(async error => {
-      if (!/ns not found|namespace/i.test(String(error?.message || error))) throw error;
-    });
-
-    const after = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
-    const actual = after?.counts || {};
-    const mismatches = Object.keys(expected)
-      .filter(key => Number(actual[key] || 0) !== Number(expected[key] || 0))
-      .map(key => ({table:key,expected:expected[key],actual:Number(actual[key] || 0)}));
-
-    if (mismatches.length) {
+    if (error?.code === "reconciliation_failed") {
       return res.status(409).json({
         ok:false,
         error:"reconciliation_failed",
-        expected,
-        actual,
-        mismatches
+        expected:error.expected,
+        actual:error.actual,
+        mismatches:error.mismatches
       });
     }
-
-    res.json({
-      ok:true,
-      migrated:true,
-      target:targetBase(),
-      expected,
-      actual
-    });
-  } catch (error) {
     console.error("[migration] failed:", error?.message || error);
     res.status(500).json({ok:false,error:"migration_failed"});
   }
 });
 
+if (process.env.MIGRATION_AUTORUN === "1") {
+  mongoose.connection.once("connected", () => {
+    setTimeout(() => {
+      runMigration({allowNonEmpty:true})
+        .then(result => {
+          console.log("[migration] autorun complete", JSON.stringify({
+            ok:result.ok,
+            expected:result.expected,
+            actual:result.actual
+          }));
+        })
+        .catch(error => {
+          console.error("[migration] autorun failed", JSON.stringify({
+            code:error?.code || "migration_failed",
+            message:String(error?.message || error),
+            expected:error?.expected,
+            actual:error?.actual,
+            mismatches:error?.mismatches
+          }));
+        });
+    }, 1500);
+  });
+}
+
 module.exports = router;
+module.exports.runMigration = runMigration;
