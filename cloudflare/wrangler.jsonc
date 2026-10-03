@@ -9,6 +9,8 @@
   "vars": {
     "APP_TIME_ZONE": "UTC",
     "APP_BUNDLE_ID": "com.barak.wordzap",
+    "APPLE_TEAM_ID": "D6DN86P8S8",
+    "APPLE_KEY_ID": "Q4VXJ68M86",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.2-1b-instruct"
   },
   "d1_databases": [
