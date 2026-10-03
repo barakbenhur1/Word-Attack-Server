@@ -472,6 +472,187 @@ async function migrationCounts(db) {
   return out;
 }
 
+function migrationMillis(value, fallback = Date.now()) {
+  if (!value) return fallback;
+  const n = new Date(value).getTime();
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function migrationArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+async function runMigrationStatements(db, statements, chunkSize = 50) {
+  let written = 0;
+  for (let i = 0; i < statements.length; i += chunkSize) {
+    const chunk = statements.slice(i, i + chunkSize);
+    if (!chunk.length) continue;
+    await db.batch(chunk);
+    written += chunk.length;
+  }
+  return written;
+}
+
+async function importLegacyProfiles(env, items) {
+  const statements = [];
+  for (const profile of migrationArray(items)) {
+    const uniqe = String(profile?.uniqe || "").trim();
+    if (!uniqe) continue;
+    const created = migrationMillis(profile?.createdAt);
+    const updated = migrationMillis(profile?.updatedAt, created);
+    statements.push(
+      env.DB.prepare(
+        "INSERT INTO profiles(uniqe,email,name,gender,language,created_at,updated_at) VALUES(?,?,?,?,?,?,?) " +
+        "ON CONFLICT(uniqe) DO UPDATE SET email=excluded.email,name=excluded.name,gender=excluded.gender,language=excluded.language,updated_at=excluded.updated_at"
+      ).bind(
+        uniqe,
+        String(profile?.email || ""),
+        String(profile?.name || ""),
+        String(profile?.gender || ""),
+        String(profile?.language || "en").toLowerCase(),
+        created,
+        updated
+      )
+    );
+  }
+  return runMigrationStatements(env.DB,statements);
+}
+
+async function importLegacyLanguages(env, items) {
+  const statements = [];
+
+  for (const languageDoc of migrationArray(items)) {
+    const language = String(languageDoc?.value || "en").toLowerCase();
+    const created = migrationMillis(languageDoc?.createdAt);
+    const updated = migrationMillis(languageDoc?.updatedAt,created);
+
+    for (const premium of migrationArray(languageDoc?.premium)) {
+      const uniqe = String(premium?.uniqe || "").trim();
+      if (!uniqe) continue;
+      statements.push(
+        env.DB.prepare(
+          "INSERT INTO premium_scores(language,uniqe,name,premium_score,created_at,updated_at) VALUES(?,?,?,?,?,?) " +
+          "ON CONFLICT(language,uniqe) DO UPDATE SET name=excluded.name,premium_score=excluded.premium_score,updated_at=excluded.updated_at"
+        ).bind(
+          language,
+          uniqe,
+          String(premium?.name || ""),
+          Number(premium?.premiumScore || 0),
+          created,
+          updated
+        )
+      );
+    }
+
+    for (const day of migrationArray(languageDoc?.days)) {
+      const dayKey = String(day?.value || "").trim();
+      if (!dayKey) continue;
+
+      for (const difficulty of migrationArray(day?.difficulties)) {
+        const difficultyValue = String(difficulty?.value || "").trim();
+        if (!difficultyValue) continue;
+
+        migrationArray(difficulty?.words).forEach((word,index) => {
+          const value = String(word || "").trim();
+          if (!value) return;
+          statements.push(
+            env.DB.prepare(
+              "INSERT INTO difficulty_words(day_key,language,difficulty,word_index,value,created_at) VALUES(?,?,?,?,?,?) " +
+              "ON CONFLICT(day_key,language,difficulty,word_index) DO UPDATE SET value=excluded.value"
+            ).bind(dayKey,language,difficultyValue,index,value,created)
+          );
+        });
+
+        for (const member of migrationArray(difficulty?.members)) {
+          const uniqe = String(member?.uniqe || "").trim();
+          if (!uniqe) continue;
+          const name = String(member?.name || "");
+
+          statements.push(
+            env.DB.prepare(
+              "INSERT INTO daily_members(day_key,language,difficulty,uniqe,name,total_score,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) " +
+              "ON CONFLICT(day_key,language,difficulty,uniqe) DO UPDATE SET name=excluded.name,total_score=excluded.total_score,updated_at=excluded.updated_at"
+            ).bind(
+              dayKey,
+              language,
+              difficultyValue,
+              uniqe,
+              name,
+              Number(member?.totalScore || 0),
+              created,
+              updated
+            )
+          );
+
+          migrationArray(member?.words).forEach((word,index) => {
+            const value = String(word?.value || "").trim();
+            if (!value) return;
+            statements.push(
+              env.DB.prepare(
+                "INSERT INTO member_words(day_key,language,difficulty,uniqe,word_index,value,guesswork_json,done,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) " +
+                "ON CONFLICT(day_key,language,difficulty,uniqe,word_index) DO UPDATE SET value=excluded.value,guesswork_json=excluded.guesswork_json,done=excluded.done,updated_at=excluded.updated_at"
+              ).bind(
+                dayKey,
+                language,
+                difficultyValue,
+                uniqe,
+                index,
+                value,
+                JSON.stringify(migrationArray(word?.guesswork)),
+                word?.done ? 1 : 0,
+                created,
+                updated
+              )
+            );
+          });
+        }
+      }
+    }
+  }
+
+  return runMigrationStatements(env.DB,statements);
+}
+
+async function importLegacyDevices(env, items) {
+  const statements = [];
+  for (const device of migrationArray(items)) {
+    const token = String(device?.token || "").trim();
+    const uniqe = String(device?.uniqe || "").trim();
+    if (!token || !uniqe) continue;
+    const created = migrationMillis(device?.createdAt);
+    const updated = migrationMillis(device?.updatedAt,created);
+    const environment = ["sandbox","prod"].includes(device?.environment)
+      ? device.environment
+      : "prod";
+
+    statements.push(
+      env.DB.prepare(
+        "INSERT INTO device_tokens(token,uniqe,environment,bundle_id,created_at,updated_at) VALUES(?,?,?,?,?,?) " +
+        "ON CONFLICT(token) DO UPDATE SET uniqe=excluded.uniqe,environment=excluded.environment,bundle_id=excluded.bundle_id,updated_at=excluded.updated_at"
+      ).bind(
+        token,
+        uniqe,
+        environment,
+        String(device?.bundleId || env.APP_BUNDLE_ID || "com.barak.wordzap"),
+        created,
+        updated
+      )
+    );
+  }
+  return runMigrationStatements(env.DB,statements);
+}
+
+async function importLegacyPayload(env, body) {
+  const kind = String(body?.kind || "");
+  const items = migrationArray(body?.items);
+
+  if (kind === "profiles") return {kind,written:await importLegacyProfiles(env,items)};
+  if (kind === "languages") return {kind,written:await importLegacyLanguages(env,items)};
+  if (kind === "devices") return {kind,written:await importLegacyDevices(env,items)};
+
+  throw Object.assign(new Error("invalid_migration_kind"),{status:400});
+}
+
 async function api(request, env, ctx) {
   if (!env.DB) return json(503, {ok:false,error:"d1_not_configured"});
   const url = new URL(request.url);
@@ -493,6 +674,12 @@ async function api(request, env, ctx) {
   if (method === "GET" && path === "/internal/migration/counts") {
     if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
     return json(200,{ok:true,counts:await migrationCounts(env.DB)});
+  }
+
+  if (method === "POST" && path === "/internal/migration/import") {
+    if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
+    const result = await importLegacyPayload(env,await readJson(request,8 * 1024 * 1024));
+    return json(200,{ok:true,...result,counts:await migrationCounts(env.DB)});
   }
   if (path === "/pvp/socket" && request.headers.get("Upgrade") === "websocket") {
     const id = env.PVP.idFromName("global");
