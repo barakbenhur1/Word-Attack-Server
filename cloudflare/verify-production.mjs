@@ -34,6 +34,8 @@ if (process.env.WORDZAP_VERIFY_PUSH === "1") {
   assert(pushHealth.ok === true, "Push health failed");
   assert(pushHealth.configured === true, "APNs is not fully configured");
   assert(Array.isArray(pushHealth.missing) && pushHealth.missing.length === 0, "APNs reports missing configuration");
+  assert(pushHealth.keyValid === true, "APNs private key could not be imported");
+  assert(pushHealth.jwtReady === true, "APNs JWT signing is not ready");
 }
 
 if (process.env.WORDZAP_VERIFY_AI !== "0") {
