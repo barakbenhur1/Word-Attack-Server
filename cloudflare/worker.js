@@ -455,6 +455,13 @@ function authorizedMigrationRequest(request, env) {
   return expected.length >= 24 && auth === "Bearer " + expected;
 }
 
+async function migrationTokenStatus(env) {
+  const token = String(env.MIGRATION_ADMIN_TOKEN || "");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const sha256 = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2,"0")).join("");
+  return {configured:token.length >= 24,length:token.length,sha256};
+}
+
 async function migrationCounts(db) {
   const tables = [
     "profiles",
@@ -669,6 +676,10 @@ async function api(request, env, ctx) {
   if (method === "GET" && path === "/ready") {
     try { await env.DB.prepare("SELECT 1 AS ok").first(); return json(200,{ok:true,storage:"ready"}); }
     catch { return json(503,{ok:false,storage:"unavailable"}); }
+  }
+
+  if (method === "GET" && path === "/internal/migration/token-status") {
+    return json(200,{ok:true,...await migrationTokenStatus(env)});
   }
 
   if (method === "GET" && path === "/internal/migration/counts") {
