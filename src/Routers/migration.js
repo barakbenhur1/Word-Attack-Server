@@ -25,7 +25,7 @@ async function cloudflareRequest(path, options = {}) {
       ...options,
       signal: controller.signal,
       headers: {
-        "authorization": "Bearer " + token,
+        authorization: "Bearer " + token,
         "content-type": "application/json",
         ...(options.headers || {})
       }
@@ -105,23 +105,11 @@ async function migrateCollection(collection, kind, onItem, batchSize = 50) {
   if (batch.length) await postItems(kind,batch);
 }
 
-router.get("/source-counts", async (req,res) => {
-  if (!authorized(req)) return res.status(401).json({error:"unauthorized"});
-  try {
-    await mongoose.connection.asPromise();
-    const db = mongoose.connection.db;
-    const [profiles,languages,devices] = await Promise.all([
-      db.collection("profileschemas").countDocuments({}),
-      db.collection("languagesschemas").countDocuments({}),
-      db.collection("devices").countDocuments({}).catch(() => 0)
-    ]);
-    res.json({ok:true,source:{profiles,languages,devices}});
-  } catch (error) {
-    res.status(500).json({ok:false,error:"source_count_failed"});
+async function performMigration({resume = false} = {}) {
+  if (String(process.env.MIGRATION_ADMIN_TOKEN || "").length < 24) {
+    throw new Error("MIGRATION_ADMIN_TOKEN is not configured");
   }
-});
 
-async function runMigration({allowNonEmpty=false} = {}) {
   await mongoose.connection.asPromise();
   const db = mongoose.connection.db;
 
@@ -129,11 +117,13 @@ async function runMigration({allowNonEmpty=false} = {}) {
   const beforeCounts = before?.counts || {};
   const nonEmpty = Object.entries(beforeCounts).filter(([,value]) => Number(value || 0) !== 0);
 
-  if (nonEmpty.length && !allowNonEmpty) {
-    const error = new Error("target_not_empty");
-    error.code = "target_not_empty";
-    error.counts = beforeCounts;
-    throw error;
+  if (nonEmpty.length && !resume) {
+    return {
+      ok:true,
+      skipped:true,
+      reason:"target_not_empty",
+      counts:beforeCounts
+    };
   }
 
   const expected = emptyExpected();
@@ -154,18 +144,20 @@ async function runMigration({allowNonEmpty=false} = {}) {
     1
   );
 
-  await migrateCollection(
-    db.collection("devices"),
-    "devices",
-    device => {
-      if (String(device?.token || "").trim() && String(device?.uniqe || "").trim()) {
-        expected.device_tokens += 1;
-      }
-    },
-    50
-  ).catch(async error => {
+  try {
+    await migrateCollection(
+      db.collection("devices"),
+      "devices",
+      device => {
+        if (String(device?.token || "").trim() && String(device?.uniqe || "").trim()) {
+          expected.device_tokens += 1;
+        }
+      },
+      50
+    );
+  } catch (error) {
     if (!/ns not found|namespace/i.test(String(error?.message || error))) throw error;
-  });
+  }
 
   const after = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
   const actual = after?.counts || {};
@@ -175,10 +167,7 @@ async function runMigration({allowNonEmpty=false} = {}) {
 
   if (mismatches.length) {
     const error = new Error("reconciliation_failed");
-    error.code = "reconciliation_failed";
-    error.expected = expected;
-    error.actual = actual;
-    error.mismatches = mismatches;
+    error.details = {expected,actual,mismatches};
     throw error;
   }
 
@@ -191,56 +180,46 @@ async function runMigration({allowNonEmpty=false} = {}) {
   };
 }
 
-router.post("/run", async (req,res) => {
+router.get("/source-counts", async (req,res) => {
   if (!authorized(req)) return res.status(401).json({error:"unauthorized"});
   try {
-    res.json(await runMigration({allowNonEmpty:req.query.resume === "1"}));
+    await mongoose.connection.asPromise();
+    const db = mongoose.connection.db;
+    const [profiles,languages,devices] = await Promise.all([
+      db.collection("profileschemas").countDocuments({}),
+      db.collection("languagesschemas").countDocuments({}),
+      db.collection("devices").countDocuments({}).catch(() => 0)
+    ]);
+    res.json({ok:true,source:{profiles,languages,devices}});
   } catch (error) {
-    if (error?.code === "target_not_empty") {
-      return res.status(409).json({
-        ok:false,
-        error:"target_not_empty",
-        counts:error.counts,
-        hint:"Retry with ?resume=1 only after reviewing the existing D1 state."
-      });
-    }
-    if (error?.code === "reconciliation_failed") {
-      return res.status(409).json({
-        ok:false,
-        error:"reconciliation_failed",
-        expected:error.expected,
-        actual:error.actual,
-        mismatches:error.mismatches
-      });
-    }
-    console.error("[migration] failed:", error?.message || error);
-    res.status(500).json({ok:false,error:"migration_failed"});
+    res.status(500).json({ok:false,error:"source_count_failed"});
   }
 });
 
-if (process.env.MIGRATION_AUTORUN === "1") {
-  mongoose.connection.once("connected", () => {
-    setTimeout(() => {
-      runMigration({allowNonEmpty:true})
-        .then(result => {
-          console.log("[migration] autorun complete", JSON.stringify({
-            ok:result.ok,
-            expected:result.expected,
-            actual:result.actual
-          }));
-        })
-        .catch(error => {
-          console.error("[migration] autorun failed", JSON.stringify({
-            code:error?.code || "migration_failed",
-            message:String(error?.message || error),
-            expected:error?.expected,
-            actual:error?.actual,
-            mismatches:error?.mismatches
-          }));
-        });
-    }, 1500);
-  });
+router.post("/run", async (req,res) => {
+  if (!authorized(req)) return res.status(401).json({error:"unauthorized"});
+  try {
+    const result = await performMigration({resume:req.query.resume === "1"});
+    res.status(result.skipped ? 409 : 200).json(result);
+  } catch (error) {
+    console.error("[migration] failed:", error?.message || error);
+    res.status(500).json({
+      ok:false,
+      error:String(error?.message || "migration_failed"),
+      details:error?.details || undefined
+    });
+  }
+});
+
+if (process.env.RUN_CLOUDFLARE_MIGRATION === "1") {
+  setTimeout(async () => {
+    try {
+      const result = await performMigration({resume:false});
+      console.log("[migration:auto]", JSON.stringify(result));
+    } catch (error) {
+      console.error("[migration:auto] failed:", error?.message || error, error?.details || "");
+    }
+  }, 5000);
 }
 
 module.exports = router;
-module.exports.runMigration = runMigration;
