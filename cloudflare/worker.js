@@ -671,6 +671,17 @@ async function api(request, env, ctx) {
     catch { return json(503,{ok:false,storage:"unavailable"}); }
   }
 
+  if (method === "GET" && path === "/push/health") {
+    const required = ["APPLE_TEAM_ID","APPLE_KEY_ID","APPLE_P8","APP_BUNDLE_ID"];
+    const missing = required.filter(key => !String(env[key] || "").trim());
+    return json(200,{
+      ok:true,
+      configured:missing.length === 0,
+      provider:"apns",
+      missing
+    });
+  }
+
 
   if (method === "GET" && path === "/internal/migration/counts") {
     if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
