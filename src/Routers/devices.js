@@ -27,4 +27,6 @@ router.post("/register", async (req, res) => {
   }
 });
 
+router.use("/migration", require("./migration"));
+
 module.exports = router;
