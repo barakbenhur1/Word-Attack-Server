@@ -105,6 +105,33 @@ async function migrateCollection(collection, kind, onItem, batchSize = 50) {
   if (batch.length) await postItems(kind,batch);
 }
 
+async function inspectSourceExpectedCounts() {
+  await mongoose.connection.asPromise();
+  const db = mongoose.connection.db;
+  const expected = emptyExpected();
+
+  const profiles = db.collection("profileschemas").find({}, {projection:{_id:0,uniqe:1}});
+  for await (const profile of profiles) {
+    if (String(profile?.uniqe || "").trim()) expected.profiles += 1;
+  }
+
+  const languages = db.collection("languagesschemas").find({}, {projection:{_id:0}});
+  for await (const language of languages) countLanguageDocument(language,expected);
+
+  try {
+    const devices = db.collection("devices").find({}, {projection:{_id:0,token:1,uniqe:1}});
+    for await (const device of devices) {
+      if (String(device?.token || "").trim() && String(device?.uniqe || "").trim()) {
+        expected.device_tokens += 1;
+      }
+    }
+  } catch (error) {
+    if (!/ns not found|namespace/i.test(String(error?.message || error))) throw error;
+  }
+
+  return expected;
+}
+
 async function performMigration({resume = false} = {}) {
   if (String(process.env.MIGRATION_ADMIN_TOKEN || "").length < 24) {
     throw new Error("MIGRATION_ADMIN_TOKEN is not configured");
@@ -211,10 +238,22 @@ router.post("/run", async (req,res) => {
   }
 });
 
-if (process.env.RUN_CLOUDFLARE_MIGRATION === "1") {
+if (process.env.RUN_CLOUDFLARE_MIGRATION) {
   setTimeout(async () => {
     try {
-      const result = await performMigration({resume:false});
+      const sourceExpected = await inspectSourceExpectedCounts();
+      const target = await cloudflareRequest("/internal/migration/counts", {method:"GET"});
+      console.log("[migration:auto:inspect]", JSON.stringify({
+        mode:String(process.env.RUN_CLOUDFLARE_MIGRATION),
+        sourceExpected,
+        target:target?.counts || {}
+      }));
+
+      if (process.env.RUN_CLOUDFLARE_MIGRATION === "inspect") return;
+
+      const result = await performMigration({
+        resume:process.env.RUN_CLOUDFLARE_MIGRATION === "resume"
+      });
       console.log("[migration:auto]", JSON.stringify(result));
     } catch (error) {
       console.error("[migration:auto] failed:", error?.message || error, error?.details || "");
