@@ -29,6 +29,13 @@ assert(ready.ok === true && ready.storage === "ready", "D1 readiness failed");
 const aiHealth = await getJson("/ai/health");
 assert(aiHealth.ok === true, "AI health failed");
 
+if (process.env.WORDZAP_VERIFY_PUSH === "1") {
+  const pushHealth = await getJson("/push/health");
+  assert(pushHealth.ok === true, "Push health failed");
+  assert(pushHealth.configured === true, "APNs is not fully configured");
+  assert(Array.isArray(pushHealth.missing) && pushHealth.missing.length === 0, "APNs reports missing configuration");
+}
+
 if (process.env.WORDZAP_VERIFY_AI !== "0") {
   const ai = await getJson("/ai/aiGuess", {
     method:"POST",
