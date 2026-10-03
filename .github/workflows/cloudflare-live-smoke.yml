@@ -27,4 +27,5 @@ jobs:
           WORDZAP_VERIFY_AI: "1"
           WORDZAP_VERIFY_STATE: "0"
           WORDZAP_VERIFY_HEBREW: "1"
+          WORDZAP_VERIFY_PUSH: "1"
         run: node cloudflare/verify-production.mjs
