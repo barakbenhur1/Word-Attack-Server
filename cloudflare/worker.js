@@ -449,28 +449,10 @@ function authorizedPushRequest(request, env) {
   return expected.length >= 16 && request.headers.get("X-API-Key") === expected;
 }
 
-const TEMP_MIGRATION_TOKEN_SHA256 = "046b85000e8ccc94b8a48bee37ea21c97279cc9569f5a6e768abea056ad06a29";
-
-async function authorizedMigrationRequest(request, env) {
-  const auth = String(request.headers.get("authorization") || "");
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (bearer.length < 24) return false;
-
+function authorizedMigrationRequest(request, env) {
   const expected = String(env.MIGRATION_ADMIN_TOKEN || "");
-  if (expected.length >= 24) return bearer === expected;
-
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bearer));
-  const sha256 = [...new Uint8Array(digest)]
-    .map(x => x.toString(16).padStart(2,"0"))
-    .join("");
-  return sha256 === TEMP_MIGRATION_TOKEN_SHA256;
-}
-
-async function migrationTokenStatus(env) {
-  const token = String(env.MIGRATION_ADMIN_TOKEN || "");
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  const sha256 = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2,"0")).join("");
-  return {configured:token.length >= 24,length:token.length,sha256};
+  const auth = String(request.headers.get("authorization") || "");
+  return expected.length >= 24 && auth === "Bearer " + expected;
 }
 
 async function migrationCounts(db) {
@@ -689,17 +671,14 @@ async function api(request, env, ctx) {
     catch { return json(503,{ok:false,storage:"unavailable"}); }
   }
 
-  if (method === "GET" && path === "/internal/migration/token-status") {
-    return json(200,{ok:true,...await migrationTokenStatus(env)});
-  }
 
   if (method === "GET" && path === "/internal/migration/counts") {
-    if (!await authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
+    if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
     return json(200,{ok:true,counts:await migrationCounts(env.DB)});
   }
 
   if (method === "POST" && path === "/internal/migration/import") {
-    if (!await authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
+    if (!authorizedMigrationRequest(request,env)) return json(401,{error:"unauthorized"});
     const result = await importLegacyPayload(env,await readJson(request,8 * 1024 * 1024));
     return json(200,{ok:true,...result,counts:await migrationCounts(env.DB)});
   }
